@@ -25,13 +25,16 @@ enum MESSAGE_TYPE {
     PING,
     GAME_INFO,
     RESET,
-    GAME_END,
+    GAME_DISCONNECT,
     ORB_CONNECT,
     PLAYER_CONNECT,
     VIEWER_CONNECT,
     PONG,
-    NEW_ORB_CODE, 
+    NEW_ORB_CODE,
+    SERVER_DISCONNECT,
+    PLAYER_OPTION
 };
+
 
 String ORB_ID    = "ORB IVRY";
 String ORB_CODE  = "";
@@ -124,6 +127,7 @@ void handle_data(WebsocketsMessage packet) {
 
     Serial.println("ORB CONNECT");
     connect_data["orb_id"]       = ORB_ID;
+    connect_data["type"]       = ORB_CONNECT;
     connect_data["orb_code"]     = ORB_CODE ;
     connect_data["orb_board"]    = get_board_string();
     String json_data;
@@ -190,7 +194,7 @@ bool connect_to_server() {
 
 void setup() {
     
-    ORB_CODE = generate_orb_code();
+    ORB_CODE = "0000";
     Serial.begin(115200);
     nextion.begin(9600);
 
