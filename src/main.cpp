@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include "EasyNextionLibrary.h" 
-const char* ssid = "AAA"; //Enter SSID
+const char* ssid = "AAA"; //Enter SSID 
 const char* password = "grelo1234"; //Enter Password
 const char* websockets_server_host = "88.187.38.210"; //Enter server adress
 const uint16_t websockets_server_port = 29920; // Enter server port
@@ -33,7 +33,7 @@ enum MESSAGE_TYPE {
     NEW_ORB_CODE, 
 };
 
-String ORB_ID    = "0";
+String ORB_ID    = "ORB IVRY";
 String ORB_CODE  = "";
 int GAME_ID      = -1;
 String GAME_NAME = "";
@@ -61,11 +61,22 @@ String get_board_string() {
     return board_string;
 
 }
+
+
+
+    
+
 String generate_orb_code() {
     String code = "";
-    while (code.length() < 4) { 
-        code+= String(random(0, 9)); 
+
+    static const char alphanum[] =
+    "0123456789"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    for (int i = 0; i < 4; ++i) {
+        code += alphanum[random(sizeof(alphanum) - 1)];
     }
+    
     return code;
     
 }
@@ -196,6 +207,7 @@ void setup() {
         nextion.writeNum("t0.pco", 2016);
         CONNECTED_TO_SERVER = connect_to_server();
         timeout_timer = millis();
+    
     } else {
         nextion.writeStr("t0.txt", "no wifi");
         nextion.writeNum("t0.pco", 63488);
