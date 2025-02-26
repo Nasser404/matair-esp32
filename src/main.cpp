@@ -4,9 +4,52 @@
 #include "EasyNextionLibrary.h" 
 const char* ssid = "AAA"; //Enter SSID 
 const char* password = "grelo1234"; //Enter Password
-const char* websockets_server_host = "88.187.38.210"; //Enter server adress
-const uint16_t websockets_server_port = 29920; // Enter server port
+const char* websockets_server_host = "88.187.38.210"; // Server adress
+const uint16_t websockets_server_port = 29920; // Server port
 
+enum MESSAGE_TYPE {
+    IDENTIFICATION  = 0 ,           
+    
+    PING            = 1,
+    PONG            = 2,
+    
+    GAME_DATA       = 3,
+    GAME_INFO       = 4,
+    GAME_DISCONNECT = 5,
+    
+    ORB_DATA        = 6,
+    ORB_RESET       = 7,
+    
+    ORB_CONNECT     = 8,
+    PLAYER_CONNECT  = 9,
+    VIEWER_CONNECT  = 10,
+
+    ORB_LIST        = 11,
+    GAME_LIST       = 12,
+    
+    DISCONNECT_REASON=13,
+    
+    ASK_MOVE        = 14,
+    MOVE            = 15,
+    
+    ORB_NEW_GAME    = 16,
+    ORB_CONTINUE_GAME=17,
+    ORB_END_GAME    = 18,
+    
+    DISCONNECT_FROM_SERVER = 19 , 
+    INFORMATION            = 20 ,
+};
+
+enum CLIENT_TYPE {
+    ORB,
+    PLAYER,
+    VIEWER,
+};
+
+enum ORB_STATUS {
+    IDLE,
+    OCCUPIED,
+};
 
 EasyNex nextion(Serial2); // RX 16,  TX 17
 
@@ -15,34 +58,19 @@ unsigned long network_timer = millis();
 unsigned long timeout_timer = millis();
 unsigned long timer = millis();
 /////////////////////////////////////////////////////////////////////
-
-
 using namespace websockets;
 WebsocketsClient client;
 
-enum MESSAGE_TYPE {
-    IDENTIFICATION,
-    PING,
-    GAME_INFO,
-    RESET,
-    GAME_DISCONNECT,
-    ORB_CONNECT,
-    PLAYER_CONNECT,
-    VIEWER_CONNECT,
-    PONG,
-    NEW_ORB_CODE,
-    SERVER_DISCONNECT,
-    PLAYER_OPTION
-};
-
-
-String ORB_ID    = "ORB IVRY";
+String ORB_ID    = "ORB PARIS";
 String ORB_CODE  = "";
+
 int GAME_ID      = -1;
 String GAME_NAME = "";
+
 bool CONNECTED_TO_WIFI      = false;
 bool CONNECTED_TO_SERVER    = false;
-unsigned short last_ping    = 0;
+
+unsigned short status       = OCCUPIED;
 
 String BOARD[8][8] = {{"bR","bN" ,"bB", "bQ", "bK", "bB", "bN", "bR"}, 
                    {"bP", "bP", "bP", "bP", "bP", "bP", "bP", "bP"}, 
@@ -65,16 +93,12 @@ String get_board_string() {
 
 }
 
-
-
-    
-
 String generate_orb_code() {
     String code = "";
 
     static const char alphanum[] =
     "0123456789"
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    "ABCDEFHIJKLMNOPQRSTUVWXYZ";
 
     for (int i = 0; i < 4; ++i) {
         code += alphanum[random(sizeof(alphanum) - 1)];
@@ -85,7 +109,24 @@ String generate_orb_code() {
 }
 
 
+void reset_orb() {
+    status = IDLE;
 
+    ///
+
+
+    ///
+    
+    JsonDocument orb_data;
+
+    orb_data["type"]    =  ORB_DATA;
+    orb_data["orb_code"]= ORB_CODE ;
+    orb_data["status"]  = status;
+    String json_data;
+    serializeJson(orb_data, json_data);
+
+    client.send(json_data); 
+}
 
 void handle_data(WebsocketsMessage packet) {
     String json_data = packet.data();
@@ -109,50 +150,57 @@ void handle_data(WebsocketsMessage packet) {
 
     switch (type)
     {
-    case PING :
-    //Serial.println("PING RECEIVED -> SENDING PONG");
-    timeout_timer = timer;
-    client.send("{\"type\":8}"); // SEND PONG
-    break;
-    
+        case PING :
+        //Serial.println("PING RECEIVED -> SENDING PONG");
+        timeout_timer = timer;
+        client.send("{\"type\":2}"); // SEND PONG
+        break;
+        
 
-    case IDENTIFICATION : 
-    client.send("{\"type\":0,\"identifier\":\"ORB\"}"); // IDENTIFICATION
-    Serial.println("INDENTIFICATION REQUEST");
-    break;
-    
-    case ORB_CONNECT : {
-    
-    JsonDocument connect_data;
+        case IDENTIFICATION : 
+        client.send("{\"type\":0,\"identifier\":0}"); // IDENTIFICATION
+        Serial.println("INDENTIFICATION REQUEST");
+        break;
+        
+        case ORB_CONNECT : {
+        
+        JsonDocument connect_data;
 
-    Serial.println("ORB CONNECT");
-    connect_data["orb_id"]       = ORB_ID;
-    connect_data["type"]       = ORB_CONNECT;
-    connect_data["orb_code"]     = ORB_CODE ;
-    connect_data["orb_board"]    = get_board_string();
-    String json_data;
-    serializeJson(connect_data, json_data);
+        Serial.println("ORB CONNECT");
+        connect_data["orb_id"]     = ORB_ID;
+        connect_data["type"]       = ORB_CONNECT;
+        connect_data["orb_code"]   = ORB_CODE ;
+        connect_data["orb_board"]  = get_board_string();
+        String json_data;
+        serializeJson(connect_data, json_data);
 
-    client.send(json_data); // SEND PONG
+        client.send(json_data); 
+        }
+        break;
+
+        case GAME_INFO :
+        Serial.println("GAME INFO");
+        GAME_ID     = data["info"]["GAME ID"];
+        //GAME_NAME   = data["info"]["NAME"];
+        break;
+
+
+        case ORB_RESET :
+        Serial.println("RESET INSTRUCTION");
+        status = OCCUPIED;
+        reset_orb();
+        break;
+        
+        case MOVE :
+        Serial.println("MOVE INSTRUCTION");
+        Serial.println(json_data);
+        break;
+
+        default: break;
     }
-    break;
-
-    case GAME_INFO :
-    Serial.println("GAME INFO");
-    GAME_ID     = data["info"]["GAME ID"];
-    //GAME_NAME   = data["info"]["NAME"];
-    break;
-
-
-    case RESET :
-    Serial.println("RESET INSTRUCTION");
-    break;
-
-    default: 
-    break;
-    }
-    //client.send("Ok");
 }
+
+
 bool connect_to_wifi() {
 
     // Connect to wifi
@@ -194,7 +242,7 @@ bool connect_to_server() {
 
 void setup() {
     
-    ORB_CODE = "0000";
+    ORB_CODE = "1000";
     Serial.begin(115200);
     nextion.begin(9600);
 
