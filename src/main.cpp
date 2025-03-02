@@ -2,10 +2,12 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include "EasyNextionLibrary.h" 
-const char* ssid = "AAA"; //Enter SSID 
-const char* password = "grelo1234"; //Enter Password
-const char* websockets_server_host = "88.187.38.210"; // Server adress
-const uint16_t websockets_server_port = 29920; // Server port
+#include <AccelStepper.h>
+const char* ssid                        = "AAA";            //WIFI SSID 
+const char* password                    = "grelo1234";      //WIFI Password
+
+const char* websockets_server_host      = "88.187.38.210";  // Server adress
+const uint16_t websockets_server_port   = 29920;            // Server port
 
 enum MESSAGE_TYPE {
     IDENTIFICATION  = 0 ,           
@@ -58,10 +60,11 @@ unsigned long network_timer = millis();
 unsigned long timeout_timer = millis();
 unsigned long timer = millis();
 /////////////////////////////////////////////////////////////////////
+
 using namespace websockets;
 WebsocketsClient client;
 
-String ORB_ID    = "ORB PARIS";
+String ORB_ID    = "ORB IVRY";
 String ORB_CODE  = "";
 
 int GAME_ID      = -1;
@@ -72,21 +75,46 @@ bool CONNECTED_TO_SERVER    = false;
 
 unsigned short status       = OCCUPIED;
 
-String BOARD[8][8] = {{"bR","bN" ,"bB", "bQ", "bK", "bB", "bN", "bR"}, 
-                   {"bP", "bP", "bP", "bP", "bP", "bP", "bP", "bP"}, 
-                   {"*", "*", "*", "*", "*", "*", "*", "*"},
-                   {"*", "*", "*", "*", "*", "*", "*", "*"},
-                   {"*", "*", "*", "*", "*", "*", "*", "*"},
-                   {"*", "*", "*", "*", "*", "*", "*", "*"},
-                   {"wP", "wP", "wP", "wP", "wP", "wP", "wP", "wP"},
-                   {"wR","wN" ,"wB", "wQ", "wK", "wB", "wN", "wR"}};
+enum PIECE_TYPE {
+    pawn    = 0,
+    knight  = 1,
+    rook    = 2,
+    bishop  = 3,
+    king    = 4,
+    queen   = 5,
+    empty,
+
+    
+};
+
+enum PIECE_COLOR {
+    white,
+    black,
+
+};
+struct piece {
+    unsigned short color;
+    unsigned short type;
+    char string;
+};
+piece BOARD[8][8] = {{{black, rook, 'R'}, {black, knight, 'N'}, {black, bishop, 'B'}, {black, queen, 'Q'}, {black, king, 'K'}, {black, bishop, 'B'},{black, knight, 'N'},{black,rook, 'R'}  }, 
+                     {{black, pawn, 'P'}, {black, pawn, 'P'},   {black, pawn, 'P'},   {black, pawn, 'P'},  {black, pawn, 'P'}, {black, pawn, 'P'},  {black, pawn, 'P'},  {black, pawn, 'P'} }, 
+                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
+                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
+                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
+                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
+                     {{white, pawn, 'p'}, {white, pawn, 'p'},   {white, pawn, 'p'},   {white, pawn, 'p'},  {white, pawn, 'p'}, {white, pawn, 'p'},  {white, pawn, 'p'},  {white, pawn, 'p'} },
+                     {{white, rook, 'r'}, {white, knight, 'n'}, {white, bishop, 'b'}, {white, queen, 'q'}, {white, king, 'k'}, {white, bishop, 'b'},{white, knight, 'n'},{white,rook, 'r'}  }
+                    };
+
+
 
 
 String get_board_string() {
     String board_string = "";
     for (int i =0;i<8;i+=1) {
         for (int j =0;j<8;j+=1) {
-            board_string +=BOARD[i][j];
+            board_string +=BOARD[i][j].string;
         }
     }
     return board_string;
@@ -107,16 +135,7 @@ String generate_orb_code() {
     return code;
     
 }
-
-
-void reset_orb() {
-    status = IDLE;
-
-    ///
-
-
-    ///
-    
+void send_orb_data() {
     JsonDocument orb_data;
 
     orb_data["type"]    =  ORB_DATA;
@@ -126,7 +145,20 @@ void reset_orb() {
     serializeJson(orb_data, json_data);
 
     client.send(json_data); 
+
 }
+
+void reset_orb() {
+    status = IDLE;
+
+    ///
+
+
+    ///
+    send_orb_data();
+
+}
+
 
 void handle_data(WebsocketsMessage packet) {
     String json_data = packet.data();
@@ -164,17 +196,17 @@ void handle_data(WebsocketsMessage packet) {
         
         case ORB_CONNECT : {
         
-        JsonDocument connect_data;
+            JsonDocument connect_data;
 
-        Serial.println("ORB CONNECT");
-        connect_data["orb_id"]     = ORB_ID;
-        connect_data["type"]       = ORB_CONNECT;
-        connect_data["orb_code"]   = ORB_CODE ;
-        connect_data["orb_board"]  = get_board_string();
-        String json_data;
-        serializeJson(connect_data, json_data);
+            Serial.println("ORB CONNECT");
+            connect_data["orb_id"]     = ORB_ID;
+            connect_data["type"]       = ORB_CONNECT;
+            connect_data["orb_code"]   = ORB_CODE ;
+            connect_data["orb_board"]  = get_board_string();
+            String json_data;
+            serializeJson(connect_data, json_data);
 
-        client.send(json_data); 
+            client.send(json_data); 
         }
         break;
 
@@ -192,8 +224,33 @@ void handle_data(WebsocketsMessage packet) {
         break;
         
         case MOVE :
-        Serial.println("MOVE INSTRUCTION");
-        Serial.println(json_data);
+        {
+            status = OCCUPIED;
+            Serial.println("MOVE INSTRUCTION");
+            Serial.println(json_data);
+
+            unsigned short xfrom, yfrom, xto, yto;
+            xfrom = data["from"][0];
+            yfrom = data["from"][1];
+            xto   = data["to"][0];
+            yto   = data["to"][1];
+
+            piece piece_to_move = BOARD[xfrom][yfrom];
+            piece square_to_move_to = BOARD[xto][yto];
+
+            
+            BOARD[xto][yto] = piece_to_move;
+            piece empty_square {empty, empty, '*'};
+            BOARD[xfrom][yfrom] = empty_square;
+        
+
+            String result = get_board_string();
+            Serial.println(result);
+
+
+            status = IDLE;
+            send_orb_data();
+        }
         break;
 
         default: break;
@@ -242,7 +299,7 @@ bool connect_to_server() {
 
 void setup() {
     
-    ORB_CODE = "1000";
+    ORB_CODE = "1100";
     Serial.begin(115200);
     nextion.begin(9600);
 
