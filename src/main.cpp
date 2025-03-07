@@ -1,57 +1,12 @@
 #include <ArduinoWebsockets.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
-#include "EasyNextionLibrary.h" 
+#include <EasyNextionLibrary.h> 
 #include <AccelStepper.h>
-const char* ssid                        = "AAA";            //WIFI SSID 
-const char* password                    = "grelo1234";      //WIFI Password
 
-const char* websockets_server_host      = "88.187.38.210";  // Server adress
-const uint16_t websockets_server_port   = 29920;            // Server port
-
-enum MESSAGE_TYPE {
-    IDENTIFICATION  = 0 ,           
-    
-    PING            = 1,
-    PONG            = 2,
-    
-    GAME_DATA       = 3,
-    GAME_INFO       = 4,
-    GAME_DISCONNECT = 5,
-    
-    ORB_DATA        = 6,
-    ORB_RESET       = 7,
-    
-    ORB_CONNECT     = 8,
-    PLAYER_CONNECT  = 9,
-    VIEWER_CONNECT  = 10,
-
-    ORB_LIST        = 11,
-    GAME_LIST       = 12,
-    
-    DISCONNECT_REASON=13,
-    
-    ASK_MOVE        = 14,
-    MOVE            = 15,
-    
-    ORB_NEW_GAME    = 16,
-    ORB_CONTINUE_GAME=17,
-    ORB_END_GAME    = 18,
-    
-    DISCONNECT_FROM_SERVER = 19 , 
-    INFORMATION            = 20 ,
-};
-
-enum CLIENT_TYPE {
-    ORB,
-    PLAYER,
-    VIEWER,
-};
-
-enum ORB_STATUS {
-    IDLE,
-    OCCUPIED,
-};
+#include <board.h>
+#include <enums.h>
+#include <config.h>
 
 EasyNex nextion(Serial2); // RX 16,  TX 17
 
@@ -64,69 +19,20 @@ unsigned long timer = millis();
 using namespace websockets;
 WebsocketsClient client;
 
-String ORB_ID    = "ORB IVRY";
-String ORB_CODE  = "";
-
-int GAME_ID      = -1;
-String GAME_NAME = "";
+String ORB_CODE   = "";
+String GAME_ID    = "";
 
 bool CONNECTED_TO_WIFI      = false;
 bool CONNECTED_TO_SERVER    = false;
-
 unsigned short status       = OCCUPIED;
-
-enum PIECE_TYPE {
-    pawn    = 0,
-    knight  = 1,
-    rook    = 2,
-    bishop  = 3,
-    king    = 4,
-    queen   = 5,
-    empty,
-
-    
-};
-
-enum PIECE_COLOR {
-    white,
-    black,
-
-};
-struct piece {
-    unsigned short color;
-    unsigned short type;
-    char string;
-};
-piece BOARD[8][8] = {{{black, rook, 'R'}, {black, knight, 'N'}, {black, bishop, 'B'}, {black, queen, 'Q'}, {black, king, 'K'}, {black, bishop, 'B'},{black, knight, 'N'},{black,rook, 'R'}  }, 
-                     {{black, pawn, 'P'}, {black, pawn, 'P'},   {black, pawn, 'P'},   {black, pawn, 'P'},  {black, pawn, 'P'}, {black, pawn, 'P'},  {black, pawn, 'P'},  {black, pawn, 'P'} }, 
-                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
-                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
-                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
-                     {{empty, empty, '*'},{empty, empty, '*'},  {empty, empty, '*'},  {empty, empty, '*'}, {empty, empty, '*'},{empty, empty, '*'}, {empty, empty, '*'}, {empty, empty, '*'}},
-                     {{white, pawn, 'p'}, {white, pawn, 'p'},   {white, pawn, 'p'},   {white, pawn, 'p'},  {white, pawn, 'p'}, {white, pawn, 'p'},  {white, pawn, 'p'},  {white, pawn, 'p'} },
-                     {{white, rook, 'r'}, {white, knight, 'n'}, {white, bishop, 'b'}, {white, queen, 'q'}, {white, king, 'k'}, {white, bishop, 'b'},{white, knight, 'n'},{white,rook, 'r'}  }
-                    };
-
-
-
-
-String get_board_string() {
-    String board_string = "";
-    for (int i =0;i<8;i+=1) {
-        for (int j =0;j<8;j+=1) {
-            board_string +=BOARD[i][j].string;
-        }
-    }
-    return board_string;
-
-}
+Board board;
 
 String generate_orb_code() {
     String code = "";
 
     static const char alphanum[] =
     "0123456789"
-    "ABCDEFHIJKLMNOPQRSTUVWXYZ";
+    "ABCDEFHIJKLMNPQRTUVWXY";
 
     for (int i = 0; i < 4; ++i) {
         code += alphanum[random(sizeof(alphanum) - 1)];
@@ -150,10 +56,13 @@ void send_orb_data() {
 
 void reset_orb() {
     status = IDLE;
-
+    GAME_ID = "";
+    
     ///
-
-
+    board.resetBoard();
+    nextion.writeStr("page 0");
+    ORB_CODE= generate_orb_code();
+    nextion.writeStr("txt_orb_code.txt", ORB_CODE);
     ///
     send_orb_data();
 
@@ -202,7 +111,7 @@ void handle_data(WebsocketsMessage packet) {
             connect_data["orb_id"]     = ORB_ID;
             connect_data["type"]       = ORB_CONNECT;
             connect_data["orb_code"]   = ORB_CODE ;
-            connect_data["orb_board"]  = get_board_string();
+            connect_data["orb_board"]  = board.getBoardString();
             String json_data;
             serializeJson(connect_data, json_data);
 
@@ -211,9 +120,24 @@ void handle_data(WebsocketsMessage packet) {
         break;
 
         case GAME_INFO :
-        Serial.println("GAME INFO");
-        GAME_ID     = data["info"]["GAME ID"];
-        //GAME_NAME   = data["info"]["NAME"];
+        {
+            Serial.println("GAME INFO");
+            GAME_ID = (const char*)data["info"]["game_id"];
+            nextion.writeStr("txt_game_id.txt", GAME_ID);
+            bool local_game = data["info"]["local_game"];
+            
+            String p1_name, p2_name;
+            if (local_game) {
+                p1_name = (const char*)data["info"]["white_player"];
+                p2_name = (const char*)data["info"]["black_player"];
+            } else {
+                p1_name = (const char*)data["info"]["white_orb"];
+                p2_name = (const char*)data["info"]["black_orb"];
+            }
+
+            nextion.writeStr("txt_p1_name.txt", p1_name);
+            nextion.writeStr("txt_p2_name.txt", p2_name);
+        }
         break;
 
 
@@ -234,19 +158,37 @@ void handle_data(WebsocketsMessage packet) {
             yfrom = data["from"][1];
             xto   = data["to"][0];
             yto   = data["to"][1];
-
-            piece piece_to_move = BOARD[xfrom][yfrom];
-            piece square_to_move_to = BOARD[xto][yto];
-
             
-            BOARD[xto][yto] = piece_to_move;
-            piece empty_square {empty, empty, '*'};
-            BOARD[xfrom][yfrom] = empty_square;
-        
+            int id =  board.getSquareNextionId({xfrom, yfrom});
+            board.movePiece({xfrom, yfrom}, {xto, yto});
+            board.printBoard();
+            
+            
+            String from_square = board.getSquareString({xfrom, yfrom})+ ".picc";
 
-            String result = get_board_string();
-            Serial.println(result);
+            String to_square = board.getSquareString({xto, yto}) + ".picc";
+            
 
+            Serial.println(from_square);
+            Serial.println(to_square);
+            nextion.writeNum(to_square, id);
+            
+            nextion.writeNum(from_square, 1);
+            /*
+            char row[8] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
+            for (int j = 0; j < 8; ++j) {
+                for (int i = 0; i < 8; ++i) {
+
+                    String square = String(row[i] + String(8-j) + ".pic");
+                    Serial.println(square);
+                    if (board.grid[i][j]) {
+            
+                        nextion.writeNum(square, board.grid[i][j]->getNextionId());
+                    } else {
+                        nextion.writeNum(square,17);
+                    }
+                }
+            }*/
 
             status = IDLE;
             send_orb_data();
@@ -305,23 +247,23 @@ void setup() {
 
     
     Serial.println(ORB_CODE);
-    Serial.println(get_board_string());
-    nextion.writeStr("text_orb_code.txt", ORB_CODE);
-    nextion.writeStr("t0.txt", "conecting...");
-    nextion.writeNum("t0.pco", 65535);
+    board.printBoard();
+    
+    nextion.writeStr("txt_orb_code.txt", ORB_CODE);
+    nextion.writeStr("txt_connected.txt", "conecting...");
+    nextion.writeNum("txt_connected.pco", 65535);
 
     CONNECTED_TO_WIFI = connect_to_wifi();
     if (CONNECTED_TO_WIFI) {
-        nextion.writeStr("t0.txt", "connected");
-        nextion.writeNum("t0.pco", 2016);
+        nextion.writeStr("txt_connected.txt", "connected");
+        nextion.writeNum("txt_connected.pco", 2016);
         CONNECTED_TO_SERVER = connect_to_server();
         timeout_timer = millis();
     
     } else {
-        nextion.writeStr("t0.txt", "no wifi");
-        nextion.writeNum("t0.pco", 63488);
+        nextion.writeStr("txt_connected.txt", "no wifi");
+        nextion.writeNum("txt_connected.pco", 63488);
     }
-    
 
 }
 
@@ -337,12 +279,10 @@ void loop() {
     }
 
     if (CONNECTED_TO_SERVER) {
-        if (timer - timeout_timer > 10000) { // TIMEOUT EVENT
+        if (timer - timeout_timer > 20000) { // TIMEOUT EVENT
             Serial.println("TIMEOUT EVENT");
             CONNECTED_TO_SERVER = false;
             client.close();
         }
     }
 }
-
-//HELLO
