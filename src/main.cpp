@@ -8,7 +8,11 @@
 #include <enums.h>
 #include <config.h>
 
+
+/////////////////////////////////// NEXTION //////////////
 EasyNex nextion(Serial2); // RX 16,  TX 17
+bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
+/////////////////////////////////////
 
 ////////////////////////////// TIMERS ///////////////////////////////
 unsigned long network_timer = millis();
@@ -16,15 +20,22 @@ unsigned long timeout_timer = millis();
 unsigned long timer = millis();
 /////////////////////////////////////////////////////////////////////
 
+/////////////////////////////// WIFI AND SERVER ///////////////
 using namespace websockets;
 WebsocketsClient client;
 
-String ORB_CODE   = "";
-String GAME_ID    = "";
 
 bool CONNECTED_TO_WIFI      = false;
 bool CONNECTED_TO_SERVER    = false;
+
+////////////////////////////////////////////////
+
+String ORB_CODE   = "";
+String GAME_ID    = "";
+String PLAYER_NAMES[2] = {"", ""};
+
 unsigned short status       = OCCUPIED;
+
 Board board;
 
 String generate_orb_code() {
@@ -60,16 +71,104 @@ void reset_orb() {
     
     ///
     board.resetBoard();
-    nextion.writeStr("page 0");
-    ORB_CODE= generate_orb_code();
-    nextion.writeStr("txt_orb_code.txt", ORB_CODE);
+    ORB_CODE = generate_orb_code();
+
+    
     ///
     send_orb_data();
+    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
+    nextion.lastCurrentPageId = 1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
+}
 
+void move_nextion_piece(std::pair<int, int> from, std::pair<int, int> to) {
+    if (nextion.currentPageId != BOARD_SCREEN) nextion.writeStr("page board_screen"); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
+
+    int xfrom = from.first, yfrom = from.second;
+    int xto = to.first, yto = to.second;
+           
+    String from_square  = board.getSquareString({xfrom, yfrom})     + ".picc";
+    String to_square    = board.getSquareString({xto, yto})         + ".picc";
+    int id              = board.getSquareNextionId({xfrom, yfrom});
+
+
+    nextion.writeNum(to_square, id);  
+    nextion.writeNum(from_square, 1);
+
+}
+
+void update_nextion_game_info() {
+    if (nextion.currentPageId != BOARD_SCREEN) nextion.writeStr("page board_screen"); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
+    nextion.writeStr("txt_game_id.txt", GAME_ID);
+    nextion.writeStr("txt_p1_name.txt", PLAYER_NAMES[0]);
+    nextion.writeStr("txt_p2_name.txt", PLAYER_NAMES[1]);
+
+}
+void load_nextion_page(){ // This function's purpose is to update the values of a new page when is first loaded,
+        // and refreshing all the components with the current values as Nextion shows the Attribute val.
+
+    if(nextion.currentPageId != nextion.lastCurrentPageId){ // If the two variables are different, means a new page is loaded.
+
+    newPageLoaded = true;    // A new page is loaded
+                // This variable is used as an argument at the if() statement on the refreshPageXX() voids, 
+                // in order when is true to update all the values on the page with their current values
+                // with out run a comparison with the last value.
+
+    switch(nextion.currentPageId) {
+        case HOME_SCREEN :
+            nextion.writeStr("txt_orb_code.txt", ORB_CODE);
+
+            if (CONNECTED_TO_WIFI) {
+                if (CONNECTED_TO_SERVER) {
+                    nextion.writeStr("txt_connected.txt", "connected");
+                    nextion.writeNum("txt_connected.pco", 2016);
+                } else {
+                    nextion.writeStr("txt_connected.txt", "not connected");
+                    nextion.writeNum("txt_connected.pco", 63488);  
+                }
+            } else {
+                nextion.writeStr("txt_connected.txt", "no wifi");
+                nextion.writeNum("txt_connected.pco", 63488);
+            }
+        break;
+
+        case BOARD_SCREEN:
+            for (int j = 0; j < 8; ++j) { // LOAD BOARD
+                for (int i = 0; i < 8; ++i) {
+                    String square  = board.getSquareString({i, j})     + ".picc";
+                    int id         = board.getSquareNextionId({i, j});
+
+                    nextion.writeNum(square, id);  
+                }
+            }
+            nextion.writeStr("txt_orb_code.txt", ORB_CODE);
+            nextion.writeStr("txt_game_id.txt", GAME_ID);
+            nextion.writeStr("txt_p1_name.txt", PLAYER_NAMES[0]);
+            nextion.writeStr("txt_p2_name.txt", PLAYER_NAMES[1]);
+        break;
+
+        case CONTROL_SCREEN:
+        break;
+
+        case SETTING_SCREEN:
+        nextion.writeStr("txt_wifi_ssid.txt",   ssid);
+        nextion.writeStr("txt_wifi_pwd.txt",    password);
+        nextion.writeStr("txt_ip.txt",          websockets_server_host);
+        nextion.writeNum("num_port.val",        websockets_server_port);
+        break;
+    }
+
+    newPageLoaded = false;  // After we have updated the new page for the first time, we update the variable to false.
+            // Now the values updated ONLY if the new value is different from the last Sent value.
+            // See void refreshPage0()
+
+    nextion.lastCurrentPageId = nextion.currentPageId; // Afer the refresh of the new page We make them equal,
+                                    // in order to identify the next page change.
+    }
 }
 
 
 void handle_data(WebsocketsMessage packet) {
+    
     String json_data = packet.data();
 
     //Serial.print("Got Message: ");
@@ -123,20 +222,19 @@ void handle_data(WebsocketsMessage packet) {
         {
             Serial.println("GAME INFO");
             GAME_ID = (const char*)data["info"]["game_id"];
-            nextion.writeStr("txt_game_id.txt", GAME_ID);
             bool local_game = data["info"]["local_game"];
             
-            String p1_name, p2_name;
+  
             if (local_game) {
-                p1_name = (const char*)data["info"]["white_player"];
-                p2_name = (const char*)data["info"]["black_player"];
+                PLAYER_NAMES[0] = (const char*)data["info"]["white_player"];
+                PLAYER_NAMES[1] = (const char*)data["info"]["black_player"];
             } else {
-                p1_name = (const char*)data["info"]["white_orb"];
-                p2_name = (const char*)data["info"]["black_orb"];
+                PLAYER_NAMES[0] = (const char*)data["info"]["white_orb"];
+                PLAYER_NAMES[1] = (const char*)data["info"]["black_orb"];
             }
 
-            nextion.writeStr("txt_p1_name.txt", p1_name);
-            nextion.writeStr("txt_p2_name.txt", p2_name);
+            update_nextion_game_info();
+
         }
         break;
 
@@ -159,36 +257,13 @@ void handle_data(WebsocketsMessage packet) {
             xto   = data["to"][0];
             yto   = data["to"][1];
             
-            int id =  board.getSquareNextionId({xfrom, yfrom});
+
+            move_nextion_piece({xfrom, yfrom}, {xto, yto});
+            
             board.movePiece({xfrom, yfrom}, {xto, yto});
             board.printBoard();
-            
-            
-            String from_square = board.getSquareString({xfrom, yfrom})+ ".picc";
 
-            String to_square = board.getSquareString({xto, yto}) + ".picc";
             
-
-            Serial.println(from_square);
-            Serial.println(to_square);
-            nextion.writeNum(to_square, id);
-            
-            nextion.writeNum(from_square, 1);
-            /*
-            char row[8] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'};
-            for (int j = 0; j < 8; ++j) {
-                for (int i = 0; i < 8; ++i) {
-
-                    String square = String(row[i] + String(8-j) + ".pic");
-                    Serial.println(square);
-                    if (board.grid[i][j]) {
-            
-                        nextion.writeNum(square, board.grid[i][j]->getNextionId());
-                    } else {
-                        nextion.writeNum(square,17);
-                    }
-                }
-            }*/
 
             status = IDLE;
             send_orb_data();
@@ -241,41 +316,41 @@ bool connect_to_server() {
 
 void setup() {
     
-    ORB_CODE = "1100";
+    ORB_CODE = generate_orb_code();
     Serial.begin(115200);
     nextion.begin(9600);
 
+
+
+    
     
     Serial.println(ORB_CODE);
     board.printBoard();
     
-    nextion.writeStr("txt_orb_code.txt", ORB_CODE);
-    nextion.writeStr("txt_connected.txt", "conecting...");
-    nextion.writeNum("txt_connected.pco", 65535);
 
     CONNECTED_TO_WIFI = connect_to_wifi();
     if (CONNECTED_TO_WIFI) {
-        nextion.writeStr("txt_connected.txt", "connected");
-        nextion.writeNum("txt_connected.pco", 2016);
         CONNECTED_TO_SERVER = connect_to_server();
         timeout_timer = millis();
-    
-    } else {
-        nextion.writeStr("txt_connected.txt", "no wifi");
-        nextion.writeNum("txt_connected.pco", 63488);
     }
+
+    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
+    nextion.lastCurrentPageId = 1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
 
 }
 
 void loop() {
     timer = millis();
     nextion.NextionListen();
+
+    load_nextion_page();
     // let the websockets client check for incoming messages
     if (timer - network_timer > 500) {
         if(client.available()) {
             client.poll();
         }
         network_timer = timer;
+    
     }
 
     if (CONNECTED_TO_SERVER) {
@@ -285,4 +360,10 @@ void loop() {
             client.close();
         }
     }
+}
+
+
+
+void trigger0(){
+    ESP.restart();
 }
