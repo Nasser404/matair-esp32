@@ -3,12 +3,46 @@
 #include <ArduinoJson.h>
 #include <EasyNextionLibrary.h> 
 #include <AccelStepper.h>
-
 #include <board.h>
 #include <enums.h>
 #include <config.h>
+#include <EEPROM.h>
 
+#include <Preferences.h>
 
+Preferences prefs;
+
+char     ssid[SSID_MAX_LEN];
+char     password[PWD_MAX_LEN];
+char     websockets_server_host[HOST_MAX_LEN];
+uint16_t websockets_server_port;
+void readCredentials() {
+    prefs.begin("orb_cfg", true); // read-only
+    // retrieve with default = empty
+    String s = prefs.getString("ssid", "");
+    String p = prefs.getString("pwd",  "");
+    String h = prefs.getString("host", "");
+  
+    // integers come back as `uint32_t`
+    uint32_t port = prefs.getUInt("port", 0);
+  
+    prefs.end();
+  
+    // copy into C-strings (or just hold as Strings if you like)
+    s.toCharArray(ssid, SSID_MAX_LEN);
+    p.toCharArray(password, PWD_MAX_LEN);
+    h.toCharArray(websockets_server_host, HOST_MAX_LEN);
+    websockets_server_port = uint16_t(port);
+  }
+
+  void writeCredentials() {
+    prefs.begin("orb_cfg", false);  // RW
+    prefs.putString("ssid",  String(ssid));
+    prefs.putString("pwd",   String(password));
+    prefs.putString("host",  String(websockets_server_host));
+    prefs.putUInt  ("port",  websockets_server_port);
+    prefs.end();
+  }
 /////////////////////////////////// NEXTION //////////////
 EasyNex nextion(Serial2); // RX 16,  TX 17
 bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
@@ -123,7 +157,7 @@ void load_nextion_page(){ // This function's purpose is to update the values of 
                     nextion.writeNum("txt_connected.pco", 2016);
                 } else {
                     nextion.writeStr("txt_connected.txt", "not connected");
-                    nextion.writeNum("txt_connected.pco", 63488);  
+                    nextion.writeNum("txt_connected.pco", 52000);  
                 }
             } else {
                 nextion.writeStr("txt_connected.txt", "no wifi");
@@ -153,7 +187,7 @@ void load_nextion_page(){ // This function's purpose is to update the values of 
         nextion.writeStr("txt_wifi_ssid.txt",   ssid);
         nextion.writeStr("txt_wifi_pwd.txt",    password);
         nextion.writeStr("txt_ip.txt",          websockets_server_host);
-        nextion.writeNum("num_port.val",        websockets_server_port);
+        nextion.writeNum("num_port.val",       websockets_server_port);
         break;
     }
 
@@ -299,7 +333,7 @@ bool connect_to_wifi() {
 bool connect_to_server() {
     Serial.println("Connecting to server.");
     // try to connect to Websockets server
-    bool connected = client.connect(websockets_server_host, websockets_server_port, "/");
+    bool connected = client.connect(websockets_server_host , websockets_server_port, "/");
     if(connected) {
         Serial.println("Connected to server !");
 
@@ -315,18 +349,26 @@ bool connect_to_server() {
 
 
 void setup() {
-    
-    ORB_CODE = generate_orb_code();
     Serial.begin(115200);
     nextion.begin(9600);
 
 
-
+      // Load from flash
+    readCredentials();
+    Serial.printf("Loaded SSID   : %s\n", ssid);
+    Serial.printf("Loaded PWD    : %s\n", password);
+    Serial.printf("Loaded Server : %s:%u\n",
+                    websockets_server_host,
+                    websockets_server_port);
+    ORB_CODE = generate_orb_code();
     
     
     Serial.println(ORB_CODE);
     board.printBoard();
     
+    nextion.lastCurrentPageId = -1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
+    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
+    load_nextion_page();
 
     CONNECTED_TO_WIFI = connect_to_wifi();
     if (CONNECTED_TO_WIFI) {
@@ -334,8 +376,9 @@ void setup() {
         timeout_timer = millis();
     }
 
-    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
-    nextion.lastCurrentPageId = 1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
+    nextion.lastCurrentPageId = -1; 
+    nextion.writeStr("page home_screen");  // LOAD HOME SCREEN PAGE
+    load_nextion_page();
 
 }
 
@@ -358,12 +401,141 @@ void loop() {
             Serial.println("TIMEOUT EVENT");
             CONNECTED_TO_SERVER = false;
             client.close();
+            nextion.lastCurrentPageId = -1; 
+            nextion.writeStr("page home_screen"); 
+            load_nextion_page();
         }
     }
 }
 
 
-
 void trigger0(){
+    String ns = nextion.readStr("txt_wifi_ssid.txt");
+    String np = nextion.readStr("txt_wifi_pwd.txt");
+    String nh = nextion.readStr("txt_ip.txt");
+    int    npn = nextion.readNumber("num_port.val");
+
+    ns.toCharArray(ssid, SSID_MAX_LEN);
+    np.toCharArray(password, PWD_MAX_LEN);
+    nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
+    websockets_server_port = uint16_t(npn);
+
+    // Persist in flash
+    writeCredentials();
+    delay(1000);
     ESP.restart();
 }
+
+  
+void trigger1() {
+    // HOME BUTTON PRESSED ON NEXTION
+    // DO HOMING SEQUENCE
+}
+//////////// CART NEXTION MANUAL COMMAND ////////
+void trigger2() {
+    // CART + BUTTON PRESSED ON NEXTION
+    // continuously MOVE CART on + DIRECTION
+}
+void trigger3() {
+    // CART + BUTTON RELEASED ON NEXTION
+    // STOP MOVing CART on + DIRECTION
+}
+void trigger4() {
+    // CART - BUTTON PRESSED ON NEXTION
+    // continuously MOVE CART on - DIRECTION
+}
+void trigger5() {
+    // CART - BUTTON RELEASED ON NEXTION
+    // STOP MOVing CART on - DIRECTION
+}
+///////////////////////////////////
+//////////// ORB NEXTION MANUAL COMMAND ////////
+void trigger6() {
+    // ORB + BUTTON PRESSED ON NEXTION
+    // continuously MOVE ORB on + DIRECTION
+}
+void trigger7() {
+    // ORB + BUTTON RELEASED ON NEXTION
+    // STOP MOVing ORB on + DIRECTION
+}
+void trigger8() {
+    // ORB - BUTTON PRESSED ON NEXTION
+    // continuously MOVE ORB on - DIRECTION
+}
+void trigger9() {
+    // ORB - BUTTON RELEASED ON NEXTION
+    // STOP MOVing ORB on - DIRECTION
+}
+///////////////////////////////////
+//////////// CAPTURE NEXTION MANUAL COMMAND ////////
+void trigger10() {
+    // CAPTURE + BUTTON PRESSED ON NEXTION
+    // continuously MOVE CAPTURE on + DIRECTION
+}
+void trigger11() {
+    // CAPTURE + BUTTON RELEASED ON NEXTION
+    // STOP MOVing CAPTURE on + DIRECTION
+}
+void trigger12() {
+    // CAPTURE - BUTTON PRESSED ON NEXTION
+    // continuously MOVE CAPTURE on - DIRECTION
+}
+void trigger13() {
+    // CAPTURE - BUTTON RELEASED ON NEXTION
+    // STOP MOVing CAPTURE on - DIRECTION
+}
+///////////////////////////////////
+//////////// GRIPPER ROT SERVO NEXTION MANUAL COMMAND ////////
+void trigger14() {
+    // GRIPPER ROT SERVO + BUTTON PRESSED ON NEXTION
+    // continuously MOVE GRIPPER ROT SERVO on + DIRECTION
+}
+void trigger15() {
+    // GRIPPER ROT SERVO + BUTTON RELEASED ON NEXTION
+    // STOP MOVing GRIPPER ROT SERVO on + DIRECTION
+}
+void trigger16() {
+    // GRIPPER ROT SERVO - BUTTON PRESSED ON NEXTION
+    // continuously MOVE GRIPPER ROT SERVO on - DIRECTION
+}
+void trigger17() {
+    // GRIPPER ROT SERVO - BUTTON RELEASED ON NEXTION
+    // STOP MOVing GRIPPER ROT SERVO on - DIRECTION
+}
+///////////////////////////////////
+//////////// LINEAR ACTUATOR NEXTION MANUAL COMMAND ////////
+void trigger18() {
+    // LINEAR ACTUATOR  + BUTTON PRESSED ON NEXTION
+    // continuously MOVE LINEAR ACTUATOR  on + DIRECTION
+}
+void trigger19() {
+    // LINEAR ACTUATOR  + BUTTON RELEASED ON NEXTION
+    // STOP MOVing LINEAR ACTUATOR  on + DIRECTION
+}
+void trigger20() {
+    // LINEAR ACTUATOR  - BUTTON PRESSED ON NEXTION
+    // continuously MOVE LINEAR ACTUATOR  on - DIRECTION
+}
+void trigger21() {
+    // LINEAR ACTUATOR  - BUTTON RELEASED ON NEXTION
+    // STOP MOVing LINEAR ACTUATOR  on - DIRECTION
+}
+///////////////////////////////////
+//////////// GRIPPER  NEXTION MANUAL COMMAND ////////
+void trigger22() {
+    // GRIPPER  + BUTTON PRESSED ON NEXTION
+    // continuously MOVE GRIPPER  on + DIRECTION
+}
+void trigger23() {
+    // GRIPPER  + BUTTON RELEASED ON NEXTION
+    // STOP MOVing GRIPPER  on + DIRECTION
+}
+void trigger24() {
+    // GRIPPER  - BUTTON PRESSED ON NEXTION
+    // continuously MOVE GRIPPER  on - DIRECTION
+}
+void trigger25() {
+    // GRIPPER  - BUTTON RELEASED ON NEXTION
+    // STOP MOVing GRIPPER  on - DIRECTION
+}
+///////////////////////////////////
