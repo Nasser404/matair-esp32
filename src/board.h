@@ -1,5 +1,9 @@
+// --- START OF FILE board.h ---
+#pragma once // <<<=== ADD THIS INCLUDE GUARD
+
 #include <Arduino.h>
-#include <piece.h>
+#include <piece.h> // piece.h should already have #pragma once
+
 class Board {
 
     public:
@@ -16,4 +20,3 @@ class Board {
         int getSquareNextionId(std::pair<int, int> pos);
         void resetBoard();
     };
-    

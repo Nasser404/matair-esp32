@@ -1,14 +1,16 @@
+// --- START OF FILE main.cpp ---
+
 #include <ArduinoWebsockets.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
-#include <EasyNextionLibrary.h> 
-#include <AccelStepper.h>
+#include <EasyNextionLibrary.h>
 #include <board.h>
 #include <enums.h>
 #include <config.h>
-#include <EEPROM.h>
-
 #include <Preferences.h>
+
+#include "hardware_pins.h"     // Include hardware pins
+#include "MotionController.h" // Include our new motion controller
 
 Preferences prefs;
 
@@ -43,8 +45,10 @@ void readCredentials() {
     prefs.putUInt  ("port",  websockets_server_port);
     prefs.end();
   }
+
+
 /////////////////////////////////// NEXTION //////////////
-EasyNex nextion(Serial2); // RX 16,  TX 17
+EasyNex nextion(Serial2);
 bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
 /////////////////////////////////////
 
@@ -57,21 +61,22 @@ unsigned long timer = millis();
 /////////////////////////////// WIFI AND SERVER ///////////////
 using namespace websockets;
 WebsocketsClient client;
-
-
 bool CONNECTED_TO_WIFI      = false;
 bool CONNECTED_TO_SERVER    = false;
-
 ////////////////////////////////////////////////
 
+//////////////////////////// ROBOT STATE //////////////////////////
 String ORB_CODE   = "";
 String GAME_ID    = "";
 String PLAYER_NAMES[2] = {"", ""};
-
-unsigned short status       = OCCUPIED;
-
-Board board;
-
+// unsigned short status = OCCUPIED; // Now managed implicitly by MotionController busy state
+Board board; // Logical board state
+MotionController motionController; // <<<=== Instantiate Motion Controller
+///////////////////////////////////////////////////////////////////
+std::pair<int, int> currentMoveFromCoords = {-1, -1};
+std::pair<int, int> currentMoveToCoords = {-1, -1};
+bool currentMoveIsCapture = false; // Flag if the current command involved a capture
+// ... (generate_orb_code remains the same) ...
 String generate_orb_code() {
     String code = "";
 
@@ -86,33 +91,48 @@ String generate_orb_code() {
     return code;
     
 }
-void send_orb_data() {
+
+
+// --- Send Orb Status Update ---
+// Call this when motion starts or stops
+void send_orb_status_update() {
     JsonDocument orb_data;
+    // Determine status based on motion controller
+    unsigned short current_status = motionController.isBusy() ? OCCUPIED : IDLE;
 
     orb_data["type"]    =  ORB_DATA;
-    orb_data["orb_code"]= ORB_CODE ;
-    orb_data["status"]  = status;
+    orb_data["orb_code"]= ORB_CODE;
+    orb_data["status"]  = current_status; // Use status derived from controller
+
     String json_data;
     serializeJson(orb_data, json_data);
 
-    client.send(json_data); 
-
+    if (client.available()) { // Check if client is valid before sending
+       client.send(json_data);
+       Serial.print("Sent Orb Status Update: "); Serial.println(current_status == IDLE ? "IDLE" : "OCCUPIED");
+    } else {
+       Serial.println("Cannot send status update, client not available.");
+    }
 }
 
+// --- Reset Orb Function ---
 void reset_orb() {
-    status = IDLE;
+    // status = IDLE; // Status is now derived
     GAME_ID = "";
-    
-    ///
-    board.resetBoard();
-    ORB_CODE = generate_orb_code();
+    PLAYER_NAMES[0] = "";
+    PLAYER_NAMES[1] = "";
 
-    
-    ///
-    send_orb_data();
-    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
-    nextion.lastCurrentPageId = 1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
+    board.resetBoard(); // Reset logical board
+    ORB_CODE = generate_orb_code(); // Generate new code on reset
+
+    // TODO: Reset motion controller state if needed? It should return to IDLE naturally.
+    // motionController.resetState(); // Might need a reset function
+
+    send_orb_status_update(); 
+    nextion.writeStr("page home_screen"); 
+    nextion.lastCurrentPageId = 255; 
 }
+
 
 void move_nextion_piece(std::pair<int, int> from, std::pair<int, int> to) {
     if (nextion.currentPageId != BOARD_SCREEN) nextion.writeStr("page board_screen"); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
@@ -201,29 +221,18 @@ void load_nextion_page(){ // This function's purpose is to update the values of 
 }
 
 
+// --- WebSocket Message Handler ---
 void handle_data(WebsocketsMessage packet) {
-    
     String json_data = packet.data();
+    // Serial.print("Got Message: "); Serial.println(json_data); // Optional debug
 
-    //Serial.print("Got Message: ");
-    //Serial.println(json_data);
-    
-    
     JsonDocument data;
     DeserializationError error = deserializeJson(data, json_data);
-
-    // Test if parsing succeeds
-    if (error) {
-      Serial.print(F("deserializeJson() failed: "));
-      Serial.println(error.f_str());
-      return;
-    }
+    if (error) { Serial.print(F("deserializeJson() failed: ")); Serial.println(error.f_str()); return; }
 
     int type = data["type"];
-    
 
-    switch (type)
-    {
+    switch (type) {
         case PING :
         //Serial.println("PING RECEIVED -> SENDING PONG");
         timeout_timer = timer;
@@ -274,40 +283,58 @@ void handle_data(WebsocketsMessage packet) {
 
 
         case ORB_RESET :
-        Serial.println("RESET INSTRUCTION");
-        status = OCCUPIED;
-        reset_orb();
+            Serial.println("RESET INSTRUCTION");
+            //current_status = OCCUPIED;
+            reset_orb();
         break;
-        
-        case MOVE :
-        {
-            status = OCCUPIED;
-            Serial.println("MOVE INSTRUCTION");
+
+
+        case MOVE : {
+            Serial.println("Received MOVE instruction:");
             Serial.println(json_data);
+            if (motionController.isBusy()) {
+                Serial.println("!!! WARNING: MOVE ignored, controller busy."); return;
+            }
 
-            unsigned short xfrom, yfrom, xto, yto;
-            xfrom = data["from"][0];
-            yfrom = data["from"][1];
-            xto   = data["to"][0];
-            yto   = data["to"][1];
-            
+            JsonArray fromArr = data["from"]; JsonArray toArr = data["to"];
+            if (fromArr.size() != 2 || toArr.size() != 2) {
+                Serial.println("Error: Invalid coordinate format."); return;
+            }
+            int xfrom = fromArr[0].as<int>(); int yfrom = fromArr[1].as<int>();
+            int xto = toArr[0].as<int>(); int yto = toArr[1].as<int>();
 
-            move_nextion_piece({xfrom, yfrom}, {xto, yto});
-            
-            board.movePiece({xfrom, yfrom}, {xto, yto});
-            board.printBoard();
+            // --- Store move details globally BEFORE starting sequence ---
+            currentMoveFromCoords = {xfrom, yfrom};
+            currentMoveToCoords = {xto, yto};
+            // Check if the target square on the LOGICAL board is occupied
+            currentMoveIsCapture = (board.grid[xto][yto] != nullptr);
+            // NOTE: MotionController also performs this check internally now
 
-            
+            String fromAlg = board.getSquareString(currentMoveFromCoords);
+            String toAlg = board.getSquareString(currentMoveToCoords);
+            Serial.print("  Parsed Move: "); Serial.print(fromAlg); Serial.print(" -> "); Serial.println(toAlg);
+            if (currentMoveIsCapture) { Serial.println("  (Will be a capture move)"); }
 
-            status = IDLE;
-            send_orb_data();
+            // --- Initiate Physical Move ---
+            bool sequenceStarted = motionController.startMoveSequence(fromAlg, toAlg);
+            if (sequenceStarted) {
+                Serial.println("  Physical move sequence initiated.");
+                send_orb_status_update(); // Send OCCUPIED status
+            } else {
+                Serial.println("  Failed to initiate physical move sequence.");
+                // Reset stored move if sequence didn't start?
+                currentMoveFromCoords = {-1, -1}; currentMoveToCoords = {-1, -1};
+                currentMoveIsCapture = false;
+            }
+            // Special move handling later...
         }
         break;
 
-        default: break;
+        default:
+            Serial.print("Unhandled message type: "); Serial.println(type);
+            break;
     }
 }
-
 
 bool connect_to_wifi() {
 
@@ -352,65 +379,108 @@ void setup() {
     Serial.begin(115200);
     nextion.begin(9600);
 
-
-      // Load from flash
     readCredentials();
-    Serial.printf("Loaded SSID   : %s\n", ssid);
-    Serial.printf("Loaded PWD    : %s\n", password);
-    Serial.printf("Loaded Server : %s:%u\n",
-                    websockets_server_host,
-                    websockets_server_port);
+    Serial.printf("Loaded SSID: %s, PWD: %s, Server: %s:%u\n", ssid, password, websockets_server_host, websockets_server_port);
+
+    motionController.setup(); // <<<=== Setup Motion Controller Hardware
+
     ORB_CODE = generate_orb_code();
-    
-    
-    Serial.println(ORB_CODE);
-    board.printBoard();
-    
-    nextion.lastCurrentPageId = -1; // At the first run of the loop, the currentPageId and the lastCurrentPageId must have different values, due to run the function firstRefresh()
-    nextion.writeStr("page home_screen"); // For synchronizing Nextion page in case of reset to Arduino
+    Serial.print("Generated ORB Code: "); Serial.println(ORB_CODE);
+    board.printBoard(); // Print initial logical board
+
+    nextion.lastCurrentPageId = -1; 
+    nextion.writeStr("page home_screen"); 
     load_nextion_page();
 
+    // Initial connection attempts
     CONNECTED_TO_WIFI = connect_to_wifi();
     if (CONNECTED_TO_WIFI) {
         CONNECTED_TO_SERVER = connect_to_server();
-        timeout_timer = millis();
+        if(CONNECTED_TO_SERVER) {
+            timeout_timer = millis();
+        }
     }
 
-    nextion.lastCurrentPageId = -1; 
-    nextion.writeStr("page home_screen");  // LOAD HOME SCREEN PAGE
+    nextion.lastCurrentPageId = -1;
+    nextion.writeStr("page home_screen"); // Go to home screen on boot
     load_nextion_page();
-
 }
 
 void loop() {
     timer = millis();
-    nextion.NextionListen();
+    nextion.NextionListen(); // Check for Nextion events
 
-    load_nextion_page();
-    // let the websockets client check for incoming messages
-    if (timer - network_timer > 500) {
-        if(client.available()) {
+    // Non-blocking update for the motion controller state machine
+    motionController.update(); // <<<=== Update Motion Controller
+
+    
+    static MotionState lastMotionState = MOTION_IDLE;
+    MotionState currentMotionState = motionController.getCurrentState();
+
+    if (lastMotionState != MOTION_IDLE && currentMotionState == MOTION_IDLE) {
+        Serial.print("MotionController transitioned from state "); Serial.print(lastMotionState);
+        Serial.println(" to MOTION_IDLE.");
+        send_orb_status_update(); // Send IDLE status
+
+        // --- Post-Sequence Updates ---
+        if (lastMotionState == DO_COMPLETE) {
+             Serial.println("Executing Post-Move Updates (Board Logic, Nextion)...");
+             // Use the globally stored coordinates from the completed move
+             if (currentMoveFromCoords.first != -1) { // Check if move data is valid
+                 // Update Nextion Display FIRST (Reflects physical action)
+                 move_nextion_piece(currentMoveFromCoords, currentMoveToCoords);
+
+                 // Update Logical Board SECOND
+                 // The movePiece function handles deleting the captured piece internally if needed
+                 board.movePiece(currentMoveFromCoords, currentMoveToCoords);
+                 board.printBoard(); // Print updated logical board state
+
+                 // Reset stored move data
+                 currentMoveFromCoords = {-1, -1};
+                 currentMoveToCoords = {-1, -1};
+                 currentMoveIsCapture = false;
+             } else {
+                 Serial.println("Warning: Post-move update requested, but no valid move data stored.");
+             }
+        } else if (lastMotionState == HOMING_COMPLETE) {
+             Serial.println("Homing sequence completed.");
+        }
+    }
+    lastMotionState = currentMotionState;
+
+
+    // Handle WebSocket polling less frequently
+    if (timer - network_timer > 200) { // Check more often than 500ms?
+        if(CONNECTED_TO_SERVER && client.available()) {
             client.poll();
         }
         network_timer = timer;
-    
     }
 
+    // Handle WebSocket connection/timeout logic
     if (CONNECTED_TO_SERVER) {
-        if (timer - timeout_timer > 20000) { // TIMEOUT EVENT
-            Serial.println("TIMEOUT EVENT");
+        if (timer - timeout_timer > 20000) { // 20 second timeout
+            Serial.println("TIMEOUT - No PING received from server.");
             CONNECTED_TO_SERVER = false;
             client.close();
-            nextion.lastCurrentPageId = -1; 
-            nextion.writeStr("page home_screen"); 
-            load_nextion_page();
+            // Update Nextion status immediately
+            if(nextion.currentPageId == HOME_SCREEN) { // Only update if on home screen?
+                 nextion.writeStr("txt_connected.txt", "no server");
+                 nextion.writeNum("txt_connected.pco", 64512); // Orange/Yellow
+            }
         }
-    }
+    } 
+
+
+    // Refresh Nextion page contents if needed (call frequently but it has internal checks)
+    load_nextion_page();
 }
 
 
-void trigger0(){
-    String ns = nextion.readStr("txt_wifi_ssid.txt");
+// --- Nextion Trigger Functions ---
+// TODO: Implement these later using MotionController manual control methods
+
+void trigger0(){     String ns = nextion.readStr("txt_wifi_ssid.txt");
     String np = nextion.readStr("txt_wifi_pwd.txt");
     String nh = nextion.readStr("txt_ip.txt");
     int    npn = nextion.readNumber("num_port.val");
@@ -425,117 +495,10 @@ void trigger0(){
     delay(1000);
     ESP.restart();
 }
-
-  
-void trigger1() {
-    // HOME BUTTON PRESSED ON NEXTION
-    // DO HOMING SEQUENCE
+void trigger1() {  Serial.println("Nextion Home Button Pressed.");
+    if (!motionController.isBusy()) {
+        motionController.startHomingSequence();
+    } else {
+        Serial.println("Cannot Home: Motion Controller is busy.");
+    }
 }
-//////////// CART NEXTION MANUAL COMMAND ////////
-void trigger2() {
-    // CART + BUTTON PRESSED ON NEXTION
-    // continuously MOVE CART on + DIRECTION
-}
-void trigger3() {
-    // CART + BUTTON RELEASED ON NEXTION
-    // STOP MOVing CART on + DIRECTION
-}
-void trigger4() {
-    // CART - BUTTON PRESSED ON NEXTION
-    // continuously MOVE CART on - DIRECTION
-}
-void trigger5() {
-    // CART - BUTTON RELEASED ON NEXTION
-    // STOP MOVing CART on - DIRECTION
-}
-///////////////////////////////////
-//////////// ORB NEXTION MANUAL COMMAND ////////
-void trigger6() {
-    // ORB + BUTTON PRESSED ON NEXTION
-    // continuously MOVE ORB on + DIRECTION
-}
-void trigger7() {
-    // ORB + BUTTON RELEASED ON NEXTION
-    // STOP MOVing ORB on + DIRECTION
-}
-void trigger8() {
-    // ORB - BUTTON PRESSED ON NEXTION
-    // continuously MOVE ORB on - DIRECTION
-}
-void trigger9() {
-    // ORB - BUTTON RELEASED ON NEXTION
-    // STOP MOVing ORB on - DIRECTION
-}
-///////////////////////////////////
-//////////// CAPTURE NEXTION MANUAL COMMAND ////////
-void trigger10() {
-    // CAPTURE + BUTTON PRESSED ON NEXTION
-    // continuously MOVE CAPTURE on + DIRECTION
-}
-void trigger11() {
-    // CAPTURE + BUTTON RELEASED ON NEXTION
-    // STOP MOVing CAPTURE on + DIRECTION
-}
-void trigger12() {
-    // CAPTURE - BUTTON PRESSED ON NEXTION
-    // continuously MOVE CAPTURE on - DIRECTION
-}
-void trigger13() {
-    // CAPTURE - BUTTON RELEASED ON NEXTION
-    // STOP MOVing CAPTURE on - DIRECTION
-}
-///////////////////////////////////
-//////////// GRIPPER ROT SERVO NEXTION MANUAL COMMAND ////////
-void trigger14() {
-    // GRIPPER ROT SERVO + BUTTON PRESSED ON NEXTION
-    // continuously MOVE GRIPPER ROT SERVO on + DIRECTION
-}
-void trigger15() {
-    // GRIPPER ROT SERVO + BUTTON RELEASED ON NEXTION
-    // STOP MOVing GRIPPER ROT SERVO on + DIRECTION
-}
-void trigger16() {
-    // GRIPPER ROT SERVO - BUTTON PRESSED ON NEXTION
-    // continuously MOVE GRIPPER ROT SERVO on - DIRECTION
-}
-void trigger17() {
-    // GRIPPER ROT SERVO - BUTTON RELEASED ON NEXTION
-    // STOP MOVing GRIPPER ROT SERVO on - DIRECTION
-}
-///////////////////////////////////
-//////////// LINEAR ACTUATOR NEXTION MANUAL COMMAND ////////
-void trigger18() {
-    // LINEAR ACTUATOR  + BUTTON PRESSED ON NEXTION
-    // continuously MOVE LINEAR ACTUATOR  on + DIRECTION
-}
-void trigger19() {
-    // LINEAR ACTUATOR  + BUTTON RELEASED ON NEXTION
-    // STOP MOVing LINEAR ACTUATOR  on + DIRECTION
-}
-void trigger20() {
-    // LINEAR ACTUATOR  - BUTTON PRESSED ON NEXTION
-    // continuously MOVE LINEAR ACTUATOR  on - DIRECTION
-}
-void trigger21() {
-    // LINEAR ACTUATOR  - BUTTON RELEASED ON NEXTION
-    // STOP MOVing LINEAR ACTUATOR  on - DIRECTION
-}
-///////////////////////////////////
-//////////// GRIPPER  NEXTION MANUAL COMMAND ////////
-void trigger22() {
-    // GRIPPER  + BUTTON PRESSED ON NEXTION
-    // continuously MOVE GRIPPER  on + DIRECTION
-}
-void trigger23() {
-    // GRIPPER  + BUTTON RELEASED ON NEXTION
-    // STOP MOVing GRIPPER  on + DIRECTION
-}
-void trigger24() {
-    // GRIPPER  - BUTTON PRESSED ON NEXTION
-    // continuously MOVE GRIPPER  on - DIRECTION
-}
-void trigger25() {
-    // GRIPPER  - BUTTON RELEASED ON NEXTION
-    // STOP MOVing GRIPPER  on - DIRECTION
-}
-///////////////////////////////////

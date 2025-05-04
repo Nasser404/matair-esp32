@@ -1,3 +1,4 @@
+#pragma once // <<<=== ADD THIS INCLUDE GUARD
 enum MESSAGE_TYPE {
     IDENTIFICATION  = 0 ,           
     

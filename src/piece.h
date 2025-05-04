@@ -1,3 +1,6 @@
+// --- START OF FILE piece.h ---
+#pragma once // <<<=== ADD THIS INCLUDE GUARD
+
 #include <Arduino.h>
 #include <iostream>
 #include <vector>
@@ -8,34 +11,39 @@ enum class PieceType { PAWN, KNIGHT, ROOK, BISHOP, KING, QUEEN };
 enum class PieceColor { BLACK, WHITE };
 
 class Piece {
-protected:
-    String name;
-    std::pair<int, int> pos;
-    PieceType type;
-    PieceColor color;
-
-public:
-    Piece(String name, std::pair<int, int> pos, PieceType type, PieceColor color)
-        : name(name), pos(pos), type(type), color(color) {}
-
-    virtual ~Piece() = default;
-
-    virtual char getSymbol() const = 0;
-    std::pair<int, int> getPosition() const { return pos; }
-    void setPosition(std::pair<int, int> newPos) { pos = newPos; }
-    int getNextionId() const {
-        switch (type) {
-            case PieceType::PAWN: return (color == PieceColor::WHITE) ? 5 : 11;
-            case PieceType::KNIGHT: return (color == PieceColor::WHITE) ? 6 : 12;
-            case PieceType::BISHOP: return (color == PieceColor::WHITE) ? 7 : 13;
-            case PieceType::ROOK: return (color == PieceColor::WHITE) ? 8 : 14;
-            case PieceType::QUEEN: return (color == PieceColor::WHITE) ? 9 : 15;
-            case PieceType::KING: return (color == PieceColor::WHITE) ? 10 : 16;
-            default: return -1;
-        }
+    protected:
+        String name;
+        std::pair<int, int> pos;
+        PieceType type;   // Protected member variable
+        PieceColor color; // Protected member variable
+    
+    public:
+        Piece(String name, std::pair<int, int> pos, PieceType type, PieceColor color)
+            : name(name), pos(pos), type(type), color(color) {}
+    
+        virtual ~Piece() = default;
+    
+        virtual char getSymbol() const = 0;
+        std::pair<int, int> getPosition() const { return pos; }
+        void setPosition(std::pair<int, int> newPos) { pos = newPos; }
+    
+        // --- ADDED GETTER METHODS ---
+        PieceType getType() const { return type; }      // <<<=== ADD THIS
+        PieceColor getColor() const { return color; }    // <<<=== ADD THIS
+        // ----------------------------
+    
+        int getNextionId() const {
+            switch (type) {
+                case PieceType::PAWN: return (color == PieceColor::WHITE) ? 5 : 11;
+                case PieceType::KNIGHT: return (color == PieceColor::WHITE) ? 6 : 12;
+                case PieceType::BISHOP: return (color == PieceColor::WHITE) ? 7 : 13;
+                case PieceType::ROOK: return (color == PieceColor::WHITE) ? 8 : 14;
+                case PieceType::QUEEN: return (color == PieceColor::WHITE) ? 9 : 15;
+                case PieceType::KING: return (color == PieceColor::WHITE) ? 10 : 16;
+                default: return -1; // Should maybe return a default 'empty' ID?
+            }
+        };
     };
-};
-
 class Pawn : public Piece {
 public:
     Pawn(std::pair<int, int> pos, PieceColor color)
@@ -77,5 +85,3 @@ public:
         : Piece("Queen", pos, PieceType::QUEEN, color) {}
     char getSymbol() const override { return (color == PieceColor::BLACK) ? 'Q' : 'q'; }
 };
-
-
