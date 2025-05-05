@@ -26,7 +26,7 @@ const int GRIPPER_SERVO_PIN = 12; // XX;  // Servo2 in previous code
 // === Linear Actuator Pins ===
 const int ACTUATOR_IN1_PIN = 32; // XX; // Motor Pin 1
 const int ACTUATOR_IN2_PIN = 33; // XX; // Motor Pin 2
-
+const int ACTUATOR_RETRACTED_SENSE_PIN = 13; 
 // === Manual Buttons ===
 const int BUTTON_PIN_1 = 34; // XX;
 const int BUTTON_PIN_2 = 35; // XX;

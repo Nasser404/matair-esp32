@@ -18,6 +18,7 @@ char     ssid[SSID_MAX_LEN];
 char     password[PWD_MAX_LEN];
 char     websockets_server_host[HOST_MAX_LEN];
 uint16_t websockets_server_port;
+bool hasIdentified = false;
 void readCredentials() {
     prefs.begin("orb_cfg", true); // read-only
     // retrieve with default = empty
@@ -75,6 +76,15 @@ MotionController motionController; // <<<=== Instantiate Motion Controller
 ///////////////////////////////////////////////////////////////////
 std::pair<int, int> currentMoveFromCoords = {-1, -1};
 std::pair<int, int> currentMoveToCoords = {-1, -1};
+// --- Struct to Store Last Processed Command ---
+struct LastCommandInfo {
+    bool isValid = false; // Flag to indicate if the data is for a valid, processed command
+    std::pair<int, int> fromCoords = {-1, -1};
+    std::pair<int, int> toCoords = {-1, -1};
+    bool wasCapture = false; // Did the original 'to' square have a piece?
+};
+
+LastCommandInfo lastCommandProcessed; // Global instance to store the info
 bool currentMoveIsCapture = false; // Flag if the current command involved a capture
 // ... (generate_orb_code remains the same) ...
 String generate_orb_code() {
@@ -96,6 +106,8 @@ String generate_orb_code() {
 // --- Send Orb Status Update ---
 // Call this when motion starts or stops
 void send_orb_status_update() {
+    if (!hasIdentified) return;
+
     JsonDocument orb_data;
     // Determine status based on motion controller
     unsigned short current_status = motionController.isBusy() ? OCCUPIED : IDLE;
@@ -149,7 +161,6 @@ void move_nextion_piece(std::pair<int, int> from, std::pair<int, int> to) {
     nextion.writeNum(from_square, 1);
 
 }
-
 void update_nextion_game_info() {
     if (nextion.currentPageId != BOARD_SCREEN) nextion.writeStr("page board_screen"); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
     nextion.writeStr("txt_game_id.txt", GAME_ID);
@@ -176,7 +187,7 @@ void load_nextion_page(){ // This function's purpose is to update the values of 
                     nextion.writeStr("txt_connected.txt", "connected");
                     nextion.writeNum("txt_connected.pco", 2016);
                 } else {
-                    nextion.writeStr("txt_connected.txt", "not connected");
+                    nextion.writeStr("txt_connected.txt", "no server");
                     nextion.writeNum("txt_connected.pco", 52000);  
                 }
             } else {
@@ -231,10 +242,10 @@ void handle_data(WebsocketsMessage packet) {
     if (error) { Serial.print(F("deserializeJson() failed: ")); Serial.println(error.f_str()); return; }
 
     int type = data["type"];
-
+    
     switch (type) {
         case PING :
-        //Serial.println("PING RECEIVED -> SENDING PONG");
+        
         timeout_timer = timer;
         client.send("{\"type\":2}"); // SEND PONG
         break;
@@ -246,7 +257,7 @@ void handle_data(WebsocketsMessage packet) {
         break;
         
         case ORB_CONNECT : {
-        
+            
             JsonDocument connect_data;
 
             Serial.println("ORB CONNECT");
@@ -257,7 +268,8 @@ void handle_data(WebsocketsMessage packet) {
             String json_data;
             serializeJson(connect_data, json_data);
 
-            client.send(json_data); 
+            client.send(json_data);
+            hasIdentified = true;
         }
         break;
 
@@ -303,32 +315,31 @@ void handle_data(WebsocketsMessage packet) {
             int xfrom = fromArr[0].as<int>(); int yfrom = fromArr[1].as<int>();
             int xto = toArr[0].as<int>(); int yto = toArr[1].as<int>();
 
-            // --- Store move details globally BEFORE starting sequence ---
-            currentMoveFromCoords = {xfrom, yfrom};
-            currentMoveToCoords = {xto, yto};
-            // Check if the target square on the LOGICAL board is occupied
-            currentMoveIsCapture = (board.grid[xto][yto] != nullptr);
-            // NOTE: MotionController also performs this check internally now
+            // --- Store Command Details ---
+            lastCommandProcessed.fromCoords = {xfrom, yfrom};
+            lastCommandProcessed.toCoords = {xto, yto};
+            lastCommandProcessed.wasCapture = (board.grid[xto][yto] != nullptr); // Check board *before* move starts
+            lastCommandProcessed.isValid = true; // Mark data as valid for post-move update
+            // TODO: Parse and store special move data here later
 
-            String fromAlg = board.getSquareString(currentMoveFromCoords);
-            String toAlg = board.getSquareString(currentMoveToCoords);
+            // --- Convert to Algebraic for Motion Controller ---
+            String fromAlg = board.getSquareString(lastCommandProcessed.fromCoords);
+            String toAlg = board.getSquareString(lastCommandProcessed.toCoords);
             Serial.print("  Parsed Move: "); Serial.print(fromAlg); Serial.print(" -> "); Serial.println(toAlg);
-            if (currentMoveIsCapture) { Serial.println("  (Will be a capture move)"); }
+            if (lastCommandProcessed.wasCapture) { Serial.println("  (Is a capture)"); }
 
             // --- Initiate Physical Move ---
+            // MotionController's start sequence will internally re-check for capture if needed
             bool sequenceStarted = motionController.startMoveSequence(fromAlg, toAlg);
             if (sequenceStarted) {
                 Serial.println("  Physical move sequence initiated.");
                 send_orb_status_update(); // Send OCCUPIED status
             } else {
                 Serial.println("  Failed to initiate physical move sequence.");
-                // Reset stored move if sequence didn't start?
-                currentMoveFromCoords = {-1, -1}; currentMoveToCoords = {-1, -1};
-                currentMoveIsCapture = false;
+                // Invalidate stored command data if sequence didn't start
+                lastCommandProcessed.isValid = false;
             }
-            // Special move handling later...
-        }
-        break;
+        } break;
 
         default:
             Serial.print("Unhandled message type: "); Serial.println(type);
@@ -414,38 +425,58 @@ void loop() {
     motionController.update(); // <<<=== Update Motion Controller
 
     
+    // --- State Transition Detection & Actions ---
     static MotionState lastMotionState = MOTION_IDLE;
     MotionState currentMotionState = motionController.getCurrentState();
 
+    // Check if the state just transitioned *to* IDLE from a non-IDLE state
     if (lastMotionState != MOTION_IDLE && currentMotionState == MOTION_IDLE) {
-        Serial.print("MotionController transitioned from state "); Serial.print(lastMotionState);
+        Serial.print("MotionController transitioned from state ");
+        Serial.print(lastMotionState); // State it came FROM
         Serial.println(" to MOTION_IDLE.");
-        send_orb_status_update(); // Send IDLE status
+
+        // Always send IDLE status update when becoming idle
+        send_orb_status_update();
 
         // --- Post-Sequence Updates ---
-        if (lastMotionState == DO_COMPLETE) {
-             Serial.println("Executing Post-Move Updates (Board Logic, Nextion)...");
-             // Use the globally stored coordinates from the completed move
-             if (currentMoveFromCoords.first != -1) { // Check if move data is valid
-                 // Update Nextion Display FIRST (Reflects physical action)
-                 move_nextion_piece(currentMoveFromCoords, currentMoveToCoords);
+        // Check if the sequence that just finished was a move AND we have valid stored data
+        if (lastMotionState == DO_COMPLETE && lastCommandProcessed.isValid) {
+            Serial.println("Executing Post-Move Updates (Board Logic, Nextion)...");
 
-                 // Update Logical Board SECOND
-                 // The movePiece function handles deleting the captured piece internally if needed
-                 board.movePiece(currentMoveFromCoords, currentMoveToCoords);
-                 board.printBoard(); // Print updated logical board state
+            // Use the globally stored coordinates from the completed command
+            std::pair<int, int> from = lastCommandProcessed.fromCoords;
+            std::pair<int, int> to = lastCommandProcessed.toCoords;
+            String fromStr = board.getSquareString(from); // For logging
+            String toStr = board.getSquareString(to);     // For logging
 
-                 // Reset stored move data
-                 currentMoveFromCoords = {-1, -1};
-                 currentMoveToCoords = {-1, -1};
-                 currentMoveIsCapture = false;
-             } else {
-                 Serial.println("Warning: Post-move update requested, but no valid move data stored.");
-             }
+            Serial.print("  Updating logical board for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
+            // Update Logical Board FIRST - board.movePiece handles internal capture logic
+            bool moveSuccess = board.movePiece(from, to);
+            if (!moveSuccess) {
+                Serial.println("!!! WARNING: Logical board move failed! Board state might be inconsistent.");
+            }
+            board.printBoard(); // Print updated logical board state
+
+            Serial.print("  Updating Nextion display for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
+            // Update Nextion Display SECOND
+            move_nextion_piece(from, to);
+
+            // Invalidate the stored command data now that it has been processed
+            lastCommandProcessed.isValid = false;
+            Serial.println("  Post-move updates complete.");
+
         } else if (lastMotionState == HOMING_COMPLETE) {
-             Serial.println("Homing sequence completed.");
+            Serial.println("Homing sequence completed. No board updates needed.");
+            // Ensure command data is invalid after homing too
+            lastCommandProcessed.isValid = false;
+        } else if (lastCommandProcessed.isValid){
+            // Became IDLE from a state other than DO_COMPLETE or HOMING_COMPLETE (e.g., ERROR)
+            // Invalidate data to prevent accidental updates later
+            Serial.println("Became IDLE unexpectedly. Invalidating last command data.");
+            lastCommandProcessed.isValid = false;
         }
     }
+    // Update the tracked state for the next iteration
     lastMotionState = currentMotionState;
 
 

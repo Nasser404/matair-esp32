@@ -18,7 +18,7 @@ const float HOMING_SPEED_CART_ORB = 1000;
 const float HOMING_ACCEL = 1500;
 
 const int GRIPPER_ROT_BOARD = 180;
-const int GRIPPER_ROT_CAPTURE = 63;
+const int GRIPPER_ROT_CAPTURE = 62;
 const long CART_SAFETY_THRESHOLD = 2250;
 const long CART_CAPTURE_HOME_THRESHOLD = 800;
 const long CART_CAPTURE_POS = 2250;
@@ -27,6 +27,7 @@ const int GripperOpen = 180;
 const int GripperClose = 50;
 
 const unsigned long ACTUATOR_TRAVEL_TIME_MS = 600;
+
 // --- Capture Zone Representation ---
 struct CapturedPieceInfo {
     bool occupied = false;
@@ -84,13 +85,24 @@ enum MotionState {
     DO_CAPTURE_PERFORM_RELEASE_RETRACT,
     DO_CAPTURE_WAIT_RELEASE_RETRACT,
     DO_CAPTURE_COMPLETE,            // Finished handling the captured piece
-    // Regular 'Take' Sequence (Now happens *after* potential capture handling)
+    // Regular 'Take' Sequence (Modified for Retract Check)
     DO_PERFORM_TAKE_EXTEND,
     DO_WAIT_TAKE_EXTEND,
     DO_PERFORM_TAKE_GRAB,
     DO_WAIT_TAKE_GRAB,
-    DO_PERFORM_TAKE_RETRACT,
-    DO_WAIT_TAKE_RETRACT,
+    DO_PERFORM_TAKE_RETRACT_INITIAL,  // <<< Start initial timed retract
+    DO_WAIT_TAKE_RETRACT_INITIAL,   // <<< Wait for initial timed retract
+    DO_CHECK_TAKE_RETRACT_SENSOR,   // <<< Check the sensor pin
+    DO_RECOVER_TAKE_RETRACT_ROTATE, // <<< Recovery: Rotate slightly
+    DO_WAIT_RECOVER_ROTATE,         // <<< Wait for rotation
+    DO_RECOVER_TAKE_RETRACT_RETRY,  // <<< Retry retract after rotation
+    DO_WAIT_RECOVER_RETRY,          // <<< Wait for retry retract
+    DO_RECOVER_TAKE_RETRACT_EXTEND, // <<< Recovery: Extend slightly
+    DO_WAIT_RECOVER_EXTEND,         // <<< Wait for extend
+    DO_RECOVER_TAKE_RETRACT_FINAL,  // <<< Final retract attempt after extend
+    DO_WAIT_RECOVER_FINAL,          // <<< Wait for final retract
+    DO_TAKE_RETRACT_CONFIRMED,      // <<< State entered when retraction is confirmed
+    DO_TAKE_RETRACT_FAILED,         // <<< State entered if recovery fails
     // Move to Destination
     DO_SAFETY_CHECKS_DEST,
     DO_MOVE_CART_TO_DEST,
@@ -156,6 +168,7 @@ private:
 
     // --- Capture Zone State ---
     CapturedPieceInfo capture_zone[32]; // Array representing the 32 slots
+    int retractRetryCount;
     
     bool homeCaptureHomed;
     bool homeCartHomed;
