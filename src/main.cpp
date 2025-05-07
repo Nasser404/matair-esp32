@@ -470,8 +470,27 @@ void loop() {
 
     // Non-blocking update for the motion controller state machine
     motionController.update(); // <<<=== Update Motion Controller
-
     
+    if (motionController.getCurrentState() == MOTION_IDLE) {
+        unsigned int step3_pos = motionController.stepper3.currentPosition();
+        bool b1= (digitalRead(BUTTON_PIN_1));
+        bool b2 = (digitalRead(BUTTON_PIN_2));
+        if ((b1 && !b2) && (step3_pos <6000)){
+            motionController.stepper3.enableOutputs();
+            motionController.stepper3.setSpeed(500);
+            motionController.stepper3.runSpeed();
+        }
+        else if ((!b1 && b2) && (step3_pos>10)){
+            motionController.stepper3.enableOutputs();
+            motionController.stepper3.setSpeed(-500);
+            motionController.stepper3.runSpeed();
+
+        }
+        else {
+            motionController.stepper3.setSpeed(0);
+            motionController.stepper3.disableOutputs();
+        };
+    };
     // --- State Transition Detection & Actions ---
     static MotionState lastMotionState = MOTION_IDLE;
     MotionState currentMotionState = motionController.getCurrentState();
@@ -630,5 +649,159 @@ void trigger1() {  Serial.println("Nextion Home Button Pressed.");
         motionController.startHomingSequence();
     } else {
         Serial.println("Cannot Home: Motion Controller is busy.");
+    }
+}
+// === CART Stepper ===
+void trigger2() { // Cart + PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Cart + PRESS");
+        motionController.startManualJog(ManualActuator::CART, true);
+    }
+}
+void trigger3() { // Cart + RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Cart + RELEASE");
+        motionController.stopManualJog(ManualActuator::CART);
+    }
+}
+void trigger4() { // Cart - PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Cart - PRESS");
+        motionController.startManualJog(ManualActuator::CART, false);
+    }
+}
+void trigger5() { // Cart - RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Cart - RELEASE");
+        motionController.stopManualJog(ManualActuator::CART);
+    }
+}
+
+// === ORB Stepper ===
+void trigger6() { // Orb + PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Orb + PRESS");
+        motionController.startManualJog(ManualActuator::ORB, true);
+    }
+}
+void trigger7() { // Orb + RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Orb + RELEASE");
+        motionController.stopManualJog(ManualActuator::ORB);
+    }
+}
+void trigger8() { // Orb - PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Orb - PRESS");
+        motionController.startManualJog(ManualActuator::ORB, false);
+    }
+}
+void trigger9() { // Orb - RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Orb - RELEASE");
+        motionController.stopManualJog(ManualActuator::ORB);
+    }
+}
+
+// === CAPTURE Stepper ===
+void trigger10() { // Capture + PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Capture + PRESS");
+        motionController.startManualJog(ManualActuator::CAPTURE, true);
+    }
+}
+void trigger11() { // Capture + RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Capture + RELEASE");
+        motionController.stopManualJog(ManualActuator::CAPTURE);
+    }
+}
+void trigger12() { // Capture - PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Capture - PRESS");
+        motionController.startManualJog(ManualActuator::CAPTURE, false);
+    }
+}
+void trigger13() { // Capture - RELEASE
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Capture - RELEASE");
+        motionController.stopManualJog(ManualActuator::CAPTURE);
+    }
+}
+
+// === GRIPPER ROTATION (Servo1) ===
+// For servos, "PRESS" will make one step. "RELEASE" does nothing here.
+void trigger14() { // Gripper Rot + PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Gripper Rot + PRESS (Step)");
+        motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, true); // True = more positive angle
+    }
+}
+void trigger15() { // Gripper Rot + RELEASE - Does nothing for stepped servo control
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        // Serial.println("Nextion: Gripper Rot + RELEASE (No action)");
+    }
+}
+void trigger16() { // Gripper Rot - PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Gripper Rot - PRESS (Step)");
+        motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, false); // False = more negative angle
+    }
+}
+void trigger17() { // Gripper Rot - RELEASE - Does nothing
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        // Serial.println("Nextion: Gripper Rot - RELEASE (No action)");
+    }
+}
+
+// === LINEAR ACTUATOR ===
+void trigger18() { // Linear Actuator + PRESS (Extend)
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Linear Actuator + PRESS (Extend)");
+        motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, true); // True = Extend
+    }
+}
+void trigger19() { // Linear Actuator + RELEASE (Stop Extend)
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Linear Actuator + RELEASE (Stop)");
+        motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
+    }
+}
+void trigger20() { // Linear Actuator - PRESS (Retract)
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Linear Actuator - PRESS (Retract)");
+        motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, false); // False = Retract
+    }
+}
+void trigger21() { // Linear Actuator - RELEASE (Stop Retract)
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Linear Actuator - RELEASE (Stop)");
+        motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
+    }
+}
+
+// === GRIPPER OPEN/CLOSE (Servo2) ===
+// For servos, "PRESS" will make one step. "RELEASE" does nothing here.
+// Positive direction = Open further, Negative direction = Close further
+void trigger22() { // Gripper Open + PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Gripper Open + PRESS (Step)");
+        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, true); // True = Open more
+    }
+}
+void trigger23() { // Gripper Open + RELEASE - Does nothing
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        // Serial.println("Nextion: Gripper Open + RELEASE (No action)");
+    }
+}
+void trigger24() { // Gripper Close - PRESS
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        Serial.println("Nextion: Gripper Close - PRESS (Step)");
+        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, false); // False = Close more
+    }
+}
+void trigger25() { // Gripper Close - RELEASE - Does nothing
+    if (nextion.currentPageId == CONTROL_SCREEN) {
+        // Serial.println("Nextion: Gripper Close - RELEASE (No action)");
     }
 }

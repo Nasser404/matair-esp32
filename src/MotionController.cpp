@@ -115,7 +115,127 @@ void MotionController::setup() {
 // ==========================================================================
 // === PRIVATE HELPER FUNCTIONS (Define Before Use) =========================
 // ==========================================================================
+bool MotionController::startManualJog(ManualActuator actuator, bool positiveDirection) {
+    if (currentState != MOTION_IDLE) {
+        Serial.println("MC_Jog: Cannot start jog, controller busy.");
+        return false;
+    }
+
+    // Stop any other jog first (simplifies logic, only one at a time)
+    // stopAllManualJogs(); // Or just let the new one override
+
+    currentJoggingActuator = actuator; // Store which one we are jogging
+    jogDirectionPositive = positiveDirection;
+
+    Serial.print("MC_Jog: Starting jog for ");
+    float speed = 0;
+
+    switch (actuator) {
+        case ManualActuator::CART:
+            Serial.print("CART, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            stepper2.enableOutputs();
+            speed = positiveDirection ? MANUAL_JOG_CART_SPEED : -MANUAL_JOG_CART_SPEED;
+            stepper2.setSpeed(speed);
+            break;
+        case ManualActuator::ORB:
+            Serial.print("ORB, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            // Apply limits for Orb
+            if (positiveDirection && stepper3.currentPosition() >= ORB_MANUAL_MAX_POS) {
+                Serial.println("  Orb at MAX, not moving."); return false; // Don't start
+            }
+            if (!positiveDirection && stepper3.currentPosition() <= ORB_MANUAL_MIN_POS) {
+                Serial.println("  Orb at MIN, not moving."); return false; // Don't start
+            }
+            stepper3.enableOutputs();
+            speed = positiveDirection ? MANUAL_JOG_ORB_SPEED : -MANUAL_JOG_ORB_SPEED;
+            stepper3.setSpeed(speed);
+            break;
+        case ManualActuator::CAPTURE:
+            Serial.print("CAPTURE, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            stepper1.enableOutputs();
+            speed = positiveDirection ? MANUAL_JOG_CAPTURE_SPEED : -MANUAL_JOG_CAPTURE_SPEED;
+            stepper1.setSpeed(speed);
+            break;
+        case ManualActuator::GRIPPER_ROTATION: {// Servo1
+            Serial.print("GRIPPER_ROT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            // For servos, we'll increment/decrement position in update() if a flag is set
+            // Or, if Nextion sends continuous press, we handle here. Assuming press-to-move.
+            // This startManualJog is more for "start continuous move until stop is called".
+            // If Nextion buttons are "momentary increment", the logic is different.
+            // For now, let's assume servos will be "jogged" by repeated calls to a "step" function
+            // or by setting a target angle. This function isn't ideal for servo "hold-to-move".
+            // We'll adjust if Nextion sends continuous press.
+            // Let's assume for now Nextion sends a "step command" trigger.
+            int currentAngle1 = servo1.read();
+            int newAngle1 = currentAngle1 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
+            servo1.write(constrain(newAngle1, 0, 180));
+            return true; // Servo move is discrete, no "stop" needed from this func
+        }
+            break;
+        case ManualActuator::GRIPPER_OPEN_CLOSE: {// Servo2
+            Serial.print("GRIPPER_OC, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            int currentAngle2 = servo2.read();
+            // Positive = Open (larger angle), Negative = Close (smaller angle)
+            int newAngle2 = currentAngle2 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
+            servo2.write(constrain(newAngle2, GripperClose - 10, GripperOpen + 10)); // Allow slight over/under
+            return true; // Servo move is discrete
+        }
+            break;
+        case ManualActuator::LINEAR_ACTUATOR:
+            Serial.print("LIN_ACT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            if (positiveDirection) commandExtendActuator(); // Positive = Extend
+            else commandRetractActuator(); // Negative = Retract
+            break;
+    }
+    return true;
+}
+
+bool MotionController::stopManualJog(ManualActuator actuator) {
+    // This function is called when a specific jog button is RELEASED
+    Serial.print("MC_Jog: Stopping jog for ");
+    switch (actuator) {
+        case ManualActuator::CART:
+            Serial.println("CART");
+            stepper2.setSpeed(0);
+            // stepper2.disableOutputs(); // Optional: disable after a delay
+            break;
+        case ManualActuator::ORB:
+            Serial.println("ORB");
+            stepper3.setSpeed(0);
+            break;
+        case ManualActuator::CAPTURE:
+            Serial.println("CAPTURE");
+            stepper1.setSpeed(0);
+            break;
+        case ManualActuator::GRIPPER_ROTATION:
+             Serial.println("GRIPPER_ROT (no continuous stop needed)");
+            break; // No continuous move for servos in current startManualJog
+        case ManualActuator::GRIPPER_OPEN_CLOSE:
+             Serial.println("GRIPPER_OC (no continuous stop needed)");
+            break; // No continuous move
+        case ManualActuator::LINEAR_ACTUATOR:
+            Serial.println("LIN_ACT");
+            commandStopActuator();
+            break;
+    }
+    // currentJoggingActuator could be cleared here if we ensure only one at a time
+    return true;
+}
+
+bool MotionController::stopAllManualJogs() {
+    Serial.println("MC_Jog: Stopping ALL manual jogs.");
+    stepper1.setSpeed(0);
+    stepper2.setSpeed(0);
+    stepper3.setSpeed(0);
+    commandStopActuator();
+    // Servos are not continuously moved by this system, so no stop needed.
+    // Optionally disable outputs:
+    // stepper1.disableOutputs(); stepper2.disableOutputs(); stepper3.disableOutputs();
+    return true;
+}
+
 // --- Helper to get ALL potential home squares for a piece type/color ---
+
 std::vector<std::pair<int, int>> MotionController::getPotentialHomeSquares(PieceType type, PieceColor color) {
     std::vector<std::pair<int, int>> homes;
     if (color == PieceColor::WHITE) { // White pieces (Rank 7 is 0-indexed y=7)
@@ -163,6 +283,7 @@ std::vector<std::pair<int, int>> MotionController::getPotentialHomeSquares(Piece
     }
     return homes;
 } 
+
 // --- Helper: Get Home Square --- <<<=== CORRECT DEFINITION SCOPE
 std::pair<int, int> MotionController::getUnambiguousHomeSquare(PieceType type, PieceColor color) {
     if (type == PieceType::KING) {
@@ -193,29 +314,20 @@ void MotionController::initializeCaptureZone() {
     for (int i = 0; i < 32; ++i) {
         capture_zone[i].occupied = false;
     }
-    // Pre-populate slots 0 and 1 with Queens (assuming Slot 16 is home/0 steps)
-    /*
-    // Adjust slot indices and piece types as needed for your setup.
-    // Slot indices here are arbitrary examples.
-    int whiteQueenSlot = 0; // Example
-    int blackQueenSlot = 1; // Example
-
-    // Check if indices are valid before assigning
-    if (whiteQueenSlot >= 0 && whiteQueenSlot < 32) {
-         capture_zone[whiteQueenSlot].occupied = true;
-         capture_zone[whiteQueenSlot].type = PieceType::QUEEN;
-         capture_zone[whiteQueenSlot].color = PieceColor::WHITE;
-         Serial.print("  Slot "); Serial.print(whiteQueenSlot); Serial.println(": White Queen (Promotion Spare)");
-    }
-     if (blackQueenSlot >= 0 && blackQueenSlot < 32 && blackQueenSlot != whiteQueenSlot) {
-         capture_zone[blackQueenSlot].occupied = true;
-         capture_zone[blackQueenSlot].type = PieceType::QUEEN;
-         capture_zone[blackQueenSlot].color = PieceColor::BLACK;
-         Serial.print("  Slot "); Serial.print(blackQueenSlot); Serial.println(": Black Queen (Promotion Spare)");
-     }*/
-    // All other slots start empty.
 }
 
+// --- Reset Internal Capture Zone State ---
+void MotionController::resetInternalCaptureZoneState() {
+    Serial.println("[MC] Resetting Internal Capture Zone Array...");
+    for (int i = 0; i < 32; ++i) {
+        capture_zone[i].occupied = false;
+    }
+
+    Serial.println("[MC] Internal Capture Zone Array Reset.");
+}
+
+
+// ... (executeStateMachine - update RESET_P4_LOGICAL_BOARD_RESET state) ...
 // --- Find Free Capture Slot ---
 // Simple linear search for now. Returns index (0-31) or -1 if full.
 int MotionController::findFreeCaptureSlot(PieceColor color) {
@@ -234,6 +346,8 @@ int MotionController::findFreeCaptureSlot(PieceColor color) {
     Serial.println("!!! ERROR: Capture Zone Full !!!");
     return -1; // Indicate zone is full
 }
+
+
 bool MotionController::startHomingSequence() {
     if (currentState != MOTION_IDLE) {
         Serial.println("MotionController Error: Cannot start homing, already busy!");
@@ -403,6 +517,7 @@ String MotionController::coordsToAlgebraic(int x, int y) {
 
 void MotionController::update() {
     stepper1.run(); stepper2.run(); stepper3.run();
+
     executeStateMachine();
     // Handle manual input later
 }
@@ -499,55 +614,57 @@ void MotionController::executeStateMachine() {
             break; // <<<=== Added break
         // =================== HOMING SEQUENCE ===================
         case HOMING_START:
-            Serial.println("[MC State] HOMING_START -> HOMING_CAPTURE_START_MOVE");
-            // Prepare for Phase 1: Home Capture Stepper
-            currentState = HOMING_CAPTURE_START_MOVE;
+            Serial.println("[MC State] HOMING_START -> HOMING_CAPTURE_START_BACKUP_MOVE");
+            currentState = HOMING_CAPTURE_START_BACKUP_MOVE; // <<< Start with backup
             stateStartTime = millis();
+            homeCaptureHomed = false; // Reset this flag here
+            homeCartHomed = false;
+            homeOrbHomed = false;
             // break; // Fall through okay
 
-        case HOMING_CAPTURE_START_MOVE:
-            Serial.println("[MC State] HOMING_CAPTURE_START_MOVE: Commanding Capture home move...");
-            stepper1.setMaxSpeed(abs(HOMING_SPEED_CAPTURE)); // Use abs() for maxSpeed
+            case HOMING_CAPTURE_START_BACKUP_MOVE:
+            Serial.println("[MC State] HOMING_CAPTURE_START_BACKUP_MOVE: Backing up Capture stepper...");
+            // Use homing speed for backup, but move in positive direction (away from switch)
+            stepper1.setMaxSpeed(abs(HOMING_SPEED_CAPTURE));
             stepper1.setAcceleration(HOMING_ACCEL);
             stepper1.enableOutputs();
-            // Move towards the endstop (negative direction assumed)
-            stepper1.move(-30000); // Large distance
+            stepper1.move(CAPTURE_HOME_BACKUP_STEPS); // Positive relative move
+            currentState = HOMING_CAPTURE_WAIT_BACKUP;
+            stateStartTime = millis();
+            break;
+
+        case HOMING_CAPTURE_WAIT_BACKUP:
+            if (stepper1.distanceToGo() == 0) {
+                Serial.println("  Capture backup complete -> HOMING_CAPTURE_START_HOME_MOVE");
+                currentState = HOMING_CAPTURE_START_HOME_MOVE; // Now move towards home
+                stateStartTime = millis();
+            }
+            // No timeout here, backup should be quick and definite
+            break;
+
+        case HOMING_CAPTURE_START_HOME_MOVE: // <<< RENAMED
+            Serial.println("[MC State] HOMING_CAPTURE_START_HOME_MOVE: Commanding Capture home move...");
+            stepper1.setMaxSpeed(abs(HOMING_SPEED_CAPTURE)); // Speed already set, but good to re-affirm
+            stepper1.setAcceleration(HOMING_ACCEL);
+            stepper1.enableOutputs();
+            stepper1.move(-30000); // Move towards the endstop (negative)
             currentState = HOMING_CAPTURE_WAIT_HIT;
             stateStartTime = millis();
-            break; // Wait for it to hit
+            break;
 
         case HOMING_CAPTURE_WAIT_HIT:
-            if (digitalRead(ENDSTOP_CAPTURE_PIN) == LOW) { // Assuming Active LOW endstop
+            if (digitalRead(ENDSTOP_CAPTURE_PIN) == LOW) { // Active LOW
                 Serial.println("[MC State] HOMING_CAPTURE_WAIT_HIT: Endstop HIT!");
-                stepper1.stop(); // Stop motor immediately
-                stepper1.setCurrentPosition(0); // Define this as home
-                homeCaptureHomed = true; // Mark as homed
-
-                // Restore normal speed/accel for Capture stepper
-                stepper1.setMaxSpeed(STEPPER_SPEED);
+                stepper1.stop();
+                stepper1.setCurrentPosition(0);
+                homeCaptureHomed = true;
+                stepper1.setMaxSpeed(STEPPER_SPEED); // Restore normal speed
                 stepper1.setAcceleration(STEPPER_ACCEL);
-
-                // Optional: Add backoff sequence here if needed
-                // currentState = HOMING_CAPTURE_BACKOFF_MOVE;
-
-                // If no backoff, proceed to next phase
                 Serial.println("  Capture Homing Complete -> HOMING_CART_ORB_START_MOVE");
                 currentState = HOMING_CART_ORB_START_MOVE;
                 stateStartTime = millis();
-
-            } else if (timeInState > 20000) { // Timeout safety
-                 Serial.println("!!! ERROR: Homing Capture Timeout !!!");
-                 stepper1.stop();
-                 // Restore speed/accel anyway
-                 stepper1.setMaxSpeed(STEPPER_SPEED);
-                 stepper1.setAcceleration(STEPPER_ACCEL);
-                 currentState = ERROR_STATE; // Or try to continue? Risky.
-                 stateStartTime = millis();
-            }
-            // else: Still moving, keep waiting in this state
+            } 
             break;
-
-        // TODO: Implement Optional Backoff States for Capture if desired
 
         case HOMING_CART_ORB_START_MOVE:
             Serial.println("[MC State] HOMING_CART_ORB_START_MOVE: Commanding Cart & Orb home moves...");
@@ -618,258 +735,233 @@ void MotionController::executeStateMachine() {
          currentState = MOTION_IDLE;
          stateStartTime = millis();
             break;
-           // =================== FULL BOARD RESET SEQUENCE ==================
-        case RESET_START:
-        Serial.println("[MC Reset] RESET_START -> Phase 1: Clear Board");
-        resetBoardIterator = 0; // Start iterating board from square 0
+   // =================== FULL PHYSICAL BOARD RESET SEQUENCE ==================
+   case RESET_START:
+   Serial.println("[MC Reset] RESET_START -> Phase 1: Clear Misplaced from Board");
+   resetBoardIterator = 0;
+   currentState = RESET_P1_ITERATE_BOARD;
+   stateStartTime = millis();
+   break;
+
+// === Phase 1: Clear ALL Pieces from Board to Capture Zone ===
+case RESET_P1_ITERATE_BOARD:
+   reset_currentBoardCoords.first = resetBoardIterator % 8;
+   reset_currentBoardCoords.second = resetBoardIterator / 8;
+   reset_currentBoardAlg = coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second);
+
+   Serial.print("[MC Reset P1] ITERATE_BOARD: Square "); Serial.print(resetBoardIterator);
+   Serial.print(" ("); Serial.print(reset_currentBoardAlg); Serial.println(")");
+
+   if (resetBoardIterator >= 64) {
+    Serial.println("  Phase 1 (Clear Misplaced Board Pieces) Complete -> RESET_P2_START");
+    currentState = RESET_P2_START;
+    resetCZIterator = 0; // Initialize for Phase 2
+    stateStartTime = millis();
+    } else {
+        currentState = RESET_P1_CHECK_SQUARE_FOR_CLEAR;
+        stateStartTime = millis();
+    }
+    break;
+
+    case RESET_P1_CHECK_SQUARE_FOR_CLEAR: {
+    Piece* pieceOnSquareP1 = board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second];
+    bool pieceToClearFromBoard = false;
+
+    if (pieceOnSquareP1 != nullptr) {
+        PieceType type = pieceOnSquareP1->getType();
+        PieceColor color = pieceOnSquareP1->getColor();
+        std::vector<std::pair<int, int>> potentialHomes = getPotentialHomeSquares(type, color);
+        bool isAlreadyOnAHomeSquare = false;
+
+        for (const auto& home : potentialHomes) {
+            if (reset_currentBoardCoords.first == home.first && reset_currentBoardCoords.second == home.second) {
+                isAlreadyOnAHomeSquare = true;
+                break;
+            }
+        }
+
+        if (!isAlreadyOnAHomeSquare) {
+            Serial.print("  Found MISPLACED piece to clear: "); Serial.print(pieceOnSquareP1->getSymbol());
+            Serial.print(" at "); Serial.println(reset_currentBoardAlg);
+            reset_pieceBeingMoved.type = type;
+            reset_pieceBeingMoved.color = color;
+            reset_pieceBeingMoved.occupied = true;
+            pieceToClearFromBoard = true;
+        } else {
+            Serial.print("  Piece "); Serial.print(pieceOnSquareP1->getSymbol());
+            Serial.print(" at "); Serial.print(reset_currentBoardAlg);
+            Serial.println(" is already on a valid home square. Skipping clear.");
+        }
+    } else {
+        Serial.print("  Square "); Serial.print(reset_currentBoardAlg); Serial.println(" is empty.");
+    }
+
+    if (pieceToClearFromBoard) {
+        currentState = RESET_P1_MOVE_TO_GRAB_FROM_BOARD;
+    } else {
+        resetBoardIterator++;
         currentState = RESET_P1_ITERATE_BOARD;
-        stateStartTime = millis();
-        break;
-
-    // === Phase 1: Clear Board (Non K/Q) to Capture Zone ===
-    case RESET_P1_ITERATE_BOARD: {
-        reset_currentBoardCoords.first = resetBoardIterator % 8;  // x
-        reset_currentBoardCoords.second = resetBoardIterator / 8; // y
-        reset_currentBoardAlg = coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second);
-
-        Serial.print("[MC Reset P1] ITERATE_BOARD: Square "); Serial.print(resetBoardIterator);
-        Serial.print(" ("); Serial.print(reset_currentBoardAlg); Serial.println(")");
-
-        if (resetBoardIterator >= 64) {
-            Serial.println("  Phase 1 (Clear Board) Complete -> RESET_P2_START");
-            currentState = RESET_P2_START;
-            resetCZIterator = 0; // Initialize for Phase 2
-            stateStartTime = millis();
-        } else {
-            currentState = RESET_P1_CHECK_SQUARE; // Check the current square
-            stateStartTime = millis();
-        }
     }
-        break;
+    stateStartTime = millis();
+}
+    break;
 
-        case RESET_P1_CHECK_SQUARE:{
-        Piece* pieceOnSquare = board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second];
-        bool pieceToClear = false; // Reset flag for current square
+case RESET_P1_MOVE_TO_GRAB_FROM_BOARD:
+   Serial.print("[MC Reset P1] MOVE_TO_GRAB_FROM_BOARD: Moving to "); Serial.println(reset_currentBoardAlg);
+   getTargetsForSquare(reset_currentBoardAlg, targetOrb1, targetCart1);
+   enforceCaptureHomedForLowCart(targetCart1);
+   enforceCartSafetyRotation(targetCart1);
+   stepper1.moveTo(0); stepper2.moveTo(targetCart1); stepper3.moveTo(targetOrb1);
+   stepper1.enableOutputs(); stepper2.enableOutputs(); stepper3.enableOutputs();
+   currentState = RESET_P1_WAIT_GRAB_POS_BOARD; stateStartTime = millis();
+   break;
 
-        if (pieceOnSquare != nullptr) {
-            PieceType type = pieceOnSquare->getType();
-            PieceColor color = pieceOnSquare->getColor();
+case RESET_P1_WAIT_GRAB_POS_BOARD:
+   if (stepper1.distanceToGo()==0 && stepper2.distanceToGo()==0 && stepper3.distanceToGo()==0) {
+       Serial.println("  Arrived -> RESET_P1_ROTATE_FOR_GRAB_BOARD");
+       currentState = RESET_P1_ROTATE_FOR_GRAB_BOARD; stateStartTime = millis();
+   }
+   break;
 
-            if (type != PieceType::KING && type != PieceType::QUEEN) {
-                // It's a Pawn, Rook, Knight, or Bishop
-                std::vector<std::pair<int, int>> potentialHomes = getPotentialHomeSquares(type, color);
-                bool isAlreadyHome = false;
+case RESET_P1_ROTATE_FOR_GRAB_BOARD:
+   Serial.println("[MC Reset P1] ROTATE_FOR_GRAB_BOARD");
+   commandRotateGripper(GRIPPER_ROT_BOARD);
+   currentState = RESET_P1_WAIT_ROTATE_GRAB_BOARD; stateStartTime = millis();
+   break;
 
-                // Check if the piece is ALREADY on one of its valid home squares
-                for (const auto& home : potentialHomes) {
-                    if (reset_currentBoardCoords.first == home.first && reset_currentBoardCoords.second == home.second) {
-                        isAlreadyHome = true;
-                        Serial.print("  Piece "); Serial.print(pieceOnSquare->getSymbol());
-                        Serial.print(" at "); Serial.print(reset_currentBoardAlg);
-                        Serial.println(" is already on a valid home square. Skipping clear.");
-                        break;
-                    }
-                }
+case RESET_P1_WAIT_ROTATE_GRAB_BOARD:
+   if (timeInState >= 450) {
+       Serial.println("  Rotated -> RESET_P1_GRAB_EXTEND_BOARD");
+       currentState = RESET_P1_GRAB_EXTEND_BOARD; stateStartTime = millis();
+   }
+   break;
 
-                if (!isAlreadyHome) {
-                    Serial.print("  Found piece to clear: "); Serial.print(pieceOnSquare->getSymbol());
-                    Serial.print(" at "); Serial.println(reset_currentBoardAlg);
-                    reset_pieceBeingMoved.type = type;
-                    reset_pieceBeingMoved.color = color;
-                    reset_pieceBeingMoved.occupied = true;
-                    pieceToClear = true;
-                }
-                // If isAlreadyHome is true, pieceToClear remains false
-            } else {
-                Serial.print("  Found King/Queen at "); Serial.print(reset_currentBoardAlg); Serial.println(", skipping in Phase 1 (Clear Board).");
-            }
+ // --- "Take" sub-sequence for P1 with Robust Retract ---
+ case RESET_P1_GRAB_EXTEND_BOARD:
+ Serial.println("[MC Reset P1] GRAB_EXTEND_BOARD");
+ commandGripperOpen(); commandExtendActuator();
+ currentState = RESET_P1_WAIT_GRAB_EXTEND_BOARD; stateStartTime = millis(); break;
+case RESET_P1_WAIT_GRAB_EXTEND_BOARD:
+ if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+     commandStopActuator(); currentState = RESET_P1_GRAB_CLOSE_BOARD; stateStartTime = millis();
+ } break;
+case RESET_P1_GRAB_CLOSE_BOARD:
+ Serial.println("[MC Reset P1] GRAB_CLOSE_BOARD");
+ commandGripperClose();
+ currentState = RESET_P1_WAIT_GRAB_CLOSE_BOARD; stateStartTime = millis(); break;
+case RESET_P1_WAIT_GRAB_CLOSE_BOARD:
+ if (timeInState >= 300) { // Gripper close time
+     Serial.println("  Grab done -> Starting Robust Retract for P1 Grab");
+     // This now acts like DO_PERFORM_TAKE_RETRACT_INITIAL
+     commandRetractActuator(); // Start retracting motor
+     retractRetryCount = 0;    // Reset retry counter
+     currentState = RESET_P1_GRAB_RETRACT_BOARD; // Go to the waiting/checking state
+     stateStartTime = millis();
+ } break;
+
+case RESET_P1_GRAB_RETRACT_BOARD: // Combines timed wait and sensor check with recovery
+// Stage 0: Initial timed retract + first sensor check
+if (retractRetryCount == 0) {
+    if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) {
+        Serial.print("  P1 Initial Retract time done. Checking sensor... ");
+        if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) { // Active HIGH
+            Serial.println("Sensor Active! -> RESET_P1_GRAB_CONFIRMED_BOARD");
+            commandStopActuator();
+            currentState = RESET_P1_GRAB_CONFIRMED_BOARD;
         } else {
-            Serial.print("  Square "); Serial.print(reset_currentBoardAlg); Serial.println(" is empty.");
+            Serial.println("Sensor Inactive. -> P1 Recovery: Rotate +5");
+            retractRetryCount = 1; // Move to next recovery stage
+            commandStopActuator(); // Stop retract before rotating
+            commandRotateGripper(constrain(servo1.read() - 5, 0, 180));
+            // We need a wait for this rotation.
+            // For now, we'll reset stateStartTime and check again in this state,
+            // assuming rotation takes less than ACTUATOR_TRAVEL_TIME.
+            // Better: dedicated wait state for rotation.
         }
-
-        if (pieceToClear) { // Only proceed if piece needs clearing
-            currentState = RESET_P1_MOVE_TO_GRAB_PIECE;
+        stateStartTime = millis(); // Reset timer for next check/action
+    }
+// Stage 1: After rotation, retry retract + second sensor check
+} else if (retractRetryCount == 1) {
+    if (timeInState >= 450 && timeInState < 450 + (ACTUATOR_TRAVEL_TIME_MS + 150) ) { // Wait for rotation, then for retract
+        // Check if this is the first time after rotation
+      
+             Serial.println("  P1 Rotated. Retrying retract...");
+             commandRetractActuator(); // Start retract again
+    }
+    if (timeInState >= 450 + ACTUATOR_TRAVEL_TIME_MS + 150) { // After rotation + retry retract time
+        Serial.print("  P1 Retry Retract time done. Checking sensor... ");
+        if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) { // Active HIGH
+            Serial.println("Sensor Active after retry! -> RESET_P1_GRAB_CONFIRMED_BOARD");
+            commandStopActuator();
+            currentState = RESET_P1_GRAB_CONFIRMED_BOARD;
         } else {
-            resetBoardIterator++; // Move to next square
-            currentState = RESET_P1_ITERATE_BOARD;
+            Serial.println("Sensor STILL Inactive after P1 retry! -> RESET_P1_GRAB_FAILED_BOARD");
+            commandStopActuator();
+            currentState = RESET_P1_GRAB_FAILED_BOARD;
         }
         stateStartTime = millis();
     }
-        break;
+}
+break; // Keep in this state until resolved or failed
 
-    case RESET_P1_MOVE_TO_GRAB_PIECE:
-        Serial.print("[MC Reset P1] MOVE_TO_GRAB_PIECE: Moving to "); Serial.println(reset_currentBoardAlg);
-        getTargetsForSquare(reset_currentBoardAlg, targetOrb1, targetCart1); // Use target1 vars
-        enforceCaptureHomedForLowCart(targetCart1); // Safety
-        enforceCartSafetyRotation(targetCart1);   // Safety
-        stepper1.moveTo(0); // Capture motor home
-        stepper2.moveTo(targetCart1);
-        stepper3.moveTo(targetOrb1);
-        stepper1.enableOutputs(); stepper2.enableOutputs(); stepper3.enableOutputs();
-        currentState = RESET_P1_WAIT_GRAB_PIECE_POS; stateStartTime = millis();
-        break;
+case RESET_P1_GRAB_CONFIRMED_BOARD:
+   Serial.println("[MC Reset P1] GRAB_CONFIRMED_BOARD -> RESET_P1_ROTATE_AWAY_BOARD_TO_CZ");
+   currentState = RESET_P1_ROTATE_AWAY_BOARD_TO_CZ; stateStartTime = millis();
+   break;
 
-    case RESET_P1_WAIT_GRAB_PIECE_POS:
-        if (stepper1.distanceToGo()==0 && stepper2.distanceToGo()==0 && stepper3.distanceToGo()==0) {
-            Serial.println("  Arrived at piece -> RESET_P1_ROTATE_FOR_GRAB");
-            currentState = RESET_P1_ROTATE_FOR_GRAB; stateStartTime = millis();
-        }
-        break;
+case RESET_P1_GRAB_FAILED_BOARD:
+   Serial.println("!!! [MC Reset P1] GRAB_FAILED_BOARD. Skipping piece.");
+   resetBoardIterator++;
+   currentState = RESET_P1_ITERATE_BOARD; stateStartTime = millis();
+   break;
 
-    case RESET_P1_ROTATE_FOR_GRAB:
-        Serial.println("[MC Reset P1] ROTATE_FOR_GRAB");
-        commandRotateGripper(GRIPPER_ROT_BOARD); // Should be board angle
-        currentState = RESET_P1_WAIT_ROTATE_GRAB; stateStartTime = millis();
-        break;
+case RESET_P1_ROTATE_AWAY_BOARD_TO_CZ:
+   Serial.println("[MC Reset P1] ROTATE_AWAY_BOARD_TO_CZ");
+   commandRotateGripper(GRIPPER_ROT_BOARD); // Safe angle
+   currentState = RESET_P1_WAIT_ROTATE_AWAY_BOARD_TO_CZ; stateStartTime = millis();
+   break;
 
-    case RESET_P1_WAIT_ROTATE_GRAB:
-        if (timeInState >= 450) {
-            Serial.println("  Rotated -> RESET_P1_PERFORM_GRAB_EXTEND");
-            currentState = RESET_P1_PERFORM_GRAB_EXTEND; stateStartTime = millis();
-        }
-        break;
+case RESET_P1_WAIT_ROTATE_AWAY_BOARD_TO_CZ:
+   if (timeInState >= 450) {
+       Serial.println("  Rotated -> RESET_P1_MOVE_TO_CZ_DROPOFF");
+       currentState = RESET_P1_MOVE_TO_CZ_DROPOFF; stateStartTime = millis();
+   }
+   break;
 
-    // --- "Take" sub-sequence for P1 (uses sensor check for retract) ---
-    case RESET_P1_PERFORM_GRAB_EXTEND:
-         Serial.println("[MC Reset P1] PERFORM_GRAB_EXTEND");
-         commandGripperOpen(); commandExtendActuator();
-         currentState = RESET_P1_WAIT_GRAB_EXTEND; stateStartTime = millis(); break;
-    case RESET_P1_WAIT_GRAB_EXTEND:
-         if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-             commandStopActuator(); currentState = RESET_P1_PERFORM_GRAB_CLOSE; stateStartTime = millis();
-         } break;
-    case RESET_P1_PERFORM_GRAB_CLOSE:
-         Serial.println("[MC Reset P1] PERFORM_GRAB_CLOSE");
-         commandGripperClose();
-         currentState = RESET_P1_WAIT_GRAB_CLOSE; stateStartTime = millis(); break;
-    case RESET_P1_WAIT_GRAB_CLOSE:
-         if (timeInState >= 300) {
-             // Transition to the "initial retract" state from the robust retract logic
-             currentState = DO_PERFORM_TAKE_RETRACT_INITIAL; // <<< REUSE EXISTING ROBUST RETRACT
-             // Modify what happens on success/failure from that reused sequence:
-             // Instead of DO_TAKE_RETRACT_CONFIRMED -> DO_SAFETY_CHECKS_DEST
-             // we need DO_TAKE_RETRACT_CONFIRMED -> RESET_P1_GRAB_CONFIRMED
-             // and DO_TAKE_RETRACT_FAILED -> RESET_P1_GRAB_FAILED
-             // This requires modifying the reused states or duplicating them.
-             // For now, let's duplicate the core retract logic for clarity in reset.
-             Serial.println("  Grab done -> RESET_P1_PERFORM_GRAB_RETRACT (Start retract check)");
-             currentState = RESET_P1_PERFORM_GRAB_RETRACT; // Go to dedicated reset retract
-             stateStartTime = millis();
-         } break;
+case RESET_P1_MOVE_TO_CZ_DROPOFF:
+   Serial.println("[MC Reset P1] MOVE_TO_CZ_DROPOFF");
+   enforceCaptureHomedForLowCart(CART_CAPTURE_POS);
+   stepper1.moveTo(0); stepper2.moveTo(CART_CAPTURE_POS);
+   stepper3.moveTo(stepper3.currentPosition());
+   stepper2.enableOutputs();
+   currentState = RESET_P1_WAIT_CZ_DROPOFF; stateStartTime = millis();
+   break;
 
-    // --- Dedicated Retract with Sensor Check for Reset_P1 ---
-    case RESET_P1_PERFORM_GRAB_RETRACT: // Initial timed retract
-        Serial.println("[MC Reset P1] PERFORM_GRAB_RETRACT (Initial)");
-        commandRetractActuator();
-        retractRetryCount = 0;
-        currentState = RESET_P1_WAIT_GRAB_RETRACT; // Wait for timed part
-        stateStartTime = millis();
-        break;
+case RESET_P1_WAIT_CZ_DROPOFF:
+   if (stepper2.distanceToGo() == 0) {
+       Serial.println("  Arrived at CZ dropoff -> RESET_P1_FIND_AVAILABLE_CZ_SLOT");
+       currentState = RESET_P1_FIND_AVAILABLE_CZ_SLOT; stateStartTime = millis();
+   }
+   break;
 
-    case RESET_P1_WAIT_GRAB_RETRACT: // Timed wait and then sensor check
-        // This state will now contain the logic from the old DO_WAIT_TAKE_RETRACT_INITIAL and DO_CHECK_TAKE_RETRACT_SENSOR
-        // We'll simplify and assume one retry path through rotation.
-        if (retractRetryCount == 0 && timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) { // Initial timed retract done
-             Serial.print("  Initial P1 retract time elapsed. Checking sensor... ");
-             if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) { // Active  HIGH
-                 Serial.println("Sensor Active! -> RESET_P1_GRAB_CONFIRMED");
-                 commandStopActuator();
-                 currentState = RESET_P1_GRAB_CONFIRMED;
-             } else {
-                 Serial.println("Sensor Inactive. -> Attempting P1 recovery rotate.");
-                 retractRetryCount = 1; // Mark first retry attempt
-                 commandStopActuator(); // Stop retract before rotating
-                 commandRotateGripper(constrain(servo1.read() + 5, 0, 180)); // Rotate +5
-                 // Need a wait state for this rotation, then retry retract.
-                 // Let's add a temporary delay here and then go back to RETRACT state
-                 // This is not ideal non-blocking but simplifies for now.
-                 delay(450);
-                 Serial.println("  P1 Recovery rotate done. Retrying retract...");
-                 commandRetractActuator(); // Start retract again
-                 // Stay in RESET_P1_WAIT_GRAB_RETRACT but with retryCount = 1
-             }
-             stateStartTime = millis(); // Reset timer for next phase of this state
-        } else if (retractRetryCount == 1 && timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) { // After retry retract
-             Serial.print("  P1 Retry retract time elapsed. Checking sensor... ");
-             if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) { // Active  HIGH
-                 Serial.println("Sensor Active after retry! -> RESET_P1_GRAB_CONFIRMED");
-                 commandStopActuator();
-                 currentState = RESET_P1_GRAB_CONFIRMED;
-             } else {
-                 Serial.println("Sensor STILL Inactive after P1 retry! -> RESET_P1_GRAB_FAILED");
-                 commandStopActuator();
-                 currentState = RESET_P1_GRAB_FAILED;
-             }
-             stateStartTime = millis();
-        }
-        break;
+case RESET_P1_FIND_AVAILABLE_CZ_SLOT:
+   Serial.println("[MC Reset P1] FIND_AVAILABLE_CZ_SLOT");
+   reset_targetCZSlotIndex = findFreeCaptureSlot(reset_pieceBeingMoved.color);
+   if (reset_targetCZSlotIndex == -1) {
+       Serial.println("!!! ERROR: CZ Full! Cannot place piece. Skipping drop.");
+       // What to do with held piece? For now, we "lose" it / skip placing
+       resetBoardIterator++; currentState = RESET_P1_ITERATE_BOARD;
+   } else {
+       if (getTargetForCapture(reset_targetCZSlotIndex + 1, reset_targetCZSlotPos)) {
+           Serial.print("  Found free CZ slot: "); Serial.print(reset_targetCZSlotIndex);
+           Serial.print(" -> Stepper Pos: "); Serial.println(reset_targetCZSlotPos);
+           currentState = RESET_P1_MOVE_CZ_MOTOR_TO_SLOT;
+       } else { /* Error, skip */ resetBoardIterator++; currentState = RESET_P1_ITERATE_BOARD;}
+   }
+   stateStartTime = millis();
+   break;
 
-
-    case RESET_P1_GRAB_CONFIRMED:
-        Serial.println("[MC Reset P1] GRAB_CONFIRMED: Piece taken from board -> RESET_P1_ROTATE_AWAY_BOARD");
-        currentState = RESET_P1_ROTATE_AWAY_BOARD; stateStartTime = millis();
-        break;
-
-    case RESET_P1_GRAB_FAILED:
-        Serial.println("!!! [MC Reset P1] GRAB_FAILED: Could not confirm retract. Skipping piece.");
-        // Problem: We might have the piece but sensor failed. Risk leaving it.
-        // Or, we couldn't pick it up.
-        // For now, skip this piece and move to the next.
-        resetBoardIterator++; // Move to next square
-        currentState = RESET_P1_ITERATE_BOARD; stateStartTime = millis();
-        break;
-
-    case RESET_P1_ROTATE_AWAY_BOARD:
-        Serial.println("[MC Reset P1] ROTATE_AWAY_BOARD");
-        commandRotateGripper(GRIPPER_ROT_BOARD); // Ensure safe rotation
-        currentState = RESET_P1_WAIT_ROTATE_AWAY; stateStartTime = millis();
-        break;
-
-    case RESET_P1_WAIT_ROTATE_AWAY:
-        if (timeInState >= 450) {
-            Serial.println("  Rotated -> RESET_P1_MOVE_TO_CZ_DROPOFF");
-            currentState = RESET_P1_MOVE_TO_CZ_DROPOFF; stateStartTime = millis();
-        }
-        break;
-
-    case RESET_P1_MOVE_TO_CZ_DROPOFF:
-        Serial.println("[MC Reset P1] MOVE_TO_CZ_DROPOFF");
-        enforceCaptureHomedForLowCart(CART_CAPTURE_POS); // Safety for Cart
-        // enforceCartSafetyRotation(CART_CAPTURE_POS); // Gripper should be at 0
-        stepper1.moveTo(0); // Capture motor stays home
-        stepper2.moveTo(CART_CAPTURE_POS);
-        stepper3.moveTo(stepper3.currentPosition()); // Orb stays
-        stepper2.enableOutputs();
-        currentState = RESET_P1_WAIT_CZ_DROPOFF; stateStartTime = millis();
-        break;
-
-    case RESET_P1_WAIT_CZ_DROPOFF:
-        if (stepper2.distanceToGo() == 0) {
-            Serial.println("  Arrived at CZ dropoff -> RESET_P1_FIND_CZ_SLOT");
-            currentState = RESET_P1_FIND_CZ_SLOT; stateStartTime = millis();
-        }
-        break;
-
-    case RESET_P1_FIND_CZ_SLOT:
-        Serial.println("[MC Reset P1] FIND_CZ_SLOT");
-        reset_targetCZSlotIndex = findFreeCaptureSlot(reset_pieceBeingMoved.color);
-        if (reset_targetCZSlotIndex == -1) {
-            Serial.println("!!! ERROR: CZ Full during P1 reset! Skipping piece drop.");
-            // What to do with held piece? Maybe drop it at current Cart pos?
-            // For now, just skip placing it and move to next board square.
-            resetBoardIterator++;
-            currentState = RESET_P1_ITERATE_BOARD;
-        } else {
-            if (getTargetForCapture(reset_targetCZSlotIndex + 1, reset_targetCZSlotPos)) {
-                Serial.print("  Found free CZ slot: "); Serial.print(reset_targetCZSlotIndex); Serial.print(" (Pos: "); Serial.print(reset_targetCZSlotPos); Serial.println(")");
-                currentState = RESET_P1_MOVE_CZ_MOTOR_TO_SLOT;
-            } else {
-                 Serial.println("!!! ERROR: Failed to get pos for CZ slot! Skipping.");
-                 resetBoardIterator++; currentState = RESET_P1_ITERATE_BOARD;
-            }
-        }
-        stateStartTime = millis();
-        break;
+   
 
     case RESET_P1_MOVE_CZ_MOTOR_TO_SLOT:
         Serial.println("[MC Reset P1] MOVE_CZ_MOTOR_TO_SLOT");
@@ -894,124 +986,122 @@ void MotionController::executeStateMachine() {
     case RESET_P1_WAIT_ROTATE_CZ_RELEASE:
         if (timeInState >= 450) {
             Serial.println("  Rotated for CZ -> RESET_P1_PERFORM_RELEASE_EXTEND");
-            currentState = RESET_P1_PERFORM_RELEASE_EXTEND; stateStartTime = millis();
+            currentState = RESET_P1_RELEASE_EXTEND_IN_CZ; stateStartTime = millis();
         }
         break;
 
-    // --- "Release" sub-sequence for P1 (simple timed retract) ---
-    case RESET_P1_PERFORM_RELEASE_EXTEND:
-         Serial.println("[MC Reset P1] PERFORM_RELEASE_EXTEND");
-         commandExtendActuator(); currentState = RESET_P1_WAIT_RELEASE_EXTEND; stateStartTime = millis(); break;
-    case RESET_P1_WAIT_RELEASE_EXTEND:
-         if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-             commandStopActuator(); currentState = RESET_P1_PERFORM_RELEASE_OPEN; stateStartTime = millis();
-         } break;
-    case RESET_P1_PERFORM_RELEASE_OPEN:
-          Serial.println("[MC Reset P1] PERFORM_RELEASE_OPEN");
-          commandGripperOpen(); currentState = RESET_P1_WAIT_RELEASE_OPEN; stateStartTime = millis(); break;
-    case RESET_P1_WAIT_RELEASE_OPEN:
-         if (timeInState >= 300) { // Gripper open time
-             currentState = RESET_P1_PERFORM_RELEASE_RETRACT; stateStartTime = millis();
-         } break;
-    case RESET_P1_PERFORM_RELEASE_RETRACT: // Simple timed retract for release
-         Serial.println("[MC Reset P1] PERFORM_RELEASE_RETRACT (Timed)");
-         commandRetractActuator(); currentState = RESET_P1_WAIT_RELEASE_RETRACT; stateStartTime = millis(); break;
-     case RESET_P1_WAIT_RELEASE_RETRACT:
-         if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-             commandStopActuator();
-             Serial.println("  Release in CZ done -> RESET_P1_UPDATE_CZ_ARRAY");
-             currentState = RESET_P1_UPDATE_CZ_ARRAY; stateStartTime = millis();
-         } break;
+     // --- "Release" sub-sequence into CZ for P1 (simple timed retract) ---
+     case RESET_P1_RELEASE_EXTEND_IN_CZ:
+     Serial.println("[MC Reset P1] RELEASE_EXTEND_IN_CZ");
+     commandExtendActuator(); currentState = RESET_P1_WAIT_RELEASE_EXTEND_IN_CZ; stateStartTime = millis(); break;
+case RESET_P1_WAIT_RELEASE_EXTEND_IN_CZ:
+     if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+         commandStopActuator(); currentState = RESET_P1_RELEASE_OPEN_IN_CZ; stateStartTime = millis();
+     } break;
+case RESET_P1_RELEASE_OPEN_IN_CZ:
+      Serial.println("[MC Reset P1] RELEASE_OPEN_IN_CZ");
+      commandGripperOpen(); currentState = RESET_P1_WAIT_RELEASE_OPEN_IN_CZ; stateStartTime = millis(); break;
+case RESET_P1_WAIT_RELEASE_OPEN_IN_CZ:
+     if (timeInState >= 300) {
+         currentState = RESET_P1_RELEASE_RETRACT_IN_CZ; stateStartTime = millis();
+     } break;
+case RESET_P1_RELEASE_RETRACT_IN_CZ:
+     Serial.println("[MC Reset P1] RELEASE_RETRACT_IN_CZ (Timed)");
+     commandRetractActuator(); currentState = RESET_P1_WAIT_RELEASE_RETRACT_IN_CZ; stateStartTime = millis(); break;
+case RESET_P1_WAIT_RELEASE_RETRACT_IN_CZ:
+     if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+         commandStopActuator();
+         Serial.println("  Release in CZ done -> RESET_P1_UPDATE_LOGIC_AND_CZ_ARRAY");
+         currentState = RESET_P1_UPDATE_LOGIC_AND_CZ_ARRAY; stateStartTime = millis();
+     } break;
 
-    case RESET_P1_UPDATE_CZ_ARRAY:
-        Serial.print("[MC Reset P1] UPDATE_CZ_ARRAY: Marking CZ slot "); Serial.print(reset_targetCZSlotIndex); Serial.println(" occupied.");
-        if (reset_targetCZSlotIndex != -1) { // Should be valid if we got here
-             capture_zone[reset_targetCZSlotIndex] = reset_pieceBeingMoved; // Store the piece info
-             // capture_zone[reset_targetCZSlotIndex].occupied = true; // Already set in reset_pieceBeingMoved
+        // The UPDATE_LOGIC_AND_CZ_ARRAY needs to use reset_pieceBeingMoved correctly.
+        case RESET_P1_UPDATE_LOGIC_AND_CZ_ARRAY:
+        Serial.print("[MC Reset P1] UPDATE_LOGIC_AND_CZ_ARRAY: Slot "); Serial.print(reset_targetCZSlotIndex);
+        if (reset_targetCZSlotIndex != -1 && reset_pieceBeingMoved.occupied) { // Ensure we have a piece
+            capture_zone[reset_targetCZSlotIndex] = reset_pieceBeingMoved;
+            Serial.print(" occupied with type "); Serial.println((int)reset_pieceBeingMoved.type);
+            reset_pieceBeingMoved.occupied = false; // Clear for next potential piece
         }
-        if (reset_currentBoardCoords.first != -1) { // Check if valid coords were stored
-            Serial.print("  Logically clearing board at: ");
-            Serial.print(coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second));
+        if (reset_currentBoardCoords.first != -1) {
+            Serial.print("  Logically clearing board at: "); Serial.println(reset_currentBoardAlg);
             delete board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second];
             board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second] = nullptr;
-            reset_currentBoardCoords = {-1, -1}; // Clear after use
-            Serial.println(" - Done.");
+            reset_currentBoardCoords = {-1,-1};
         }
-        // Rotate gripper back before moving away
         commandRotateGripper(GRIPPER_ROT_BOARD);
         delay(450); // TODO: Non-blocking wait
-        currentState = RESET_P1_PIECE_CLEARED; stateStartTime = millis();
+        currentState = RESET_P1_PIECE_CLEARED_TO_CZ; stateStartTime = millis();
         break;
 
-    case RESET_P1_PIECE_CLEARED:
-        Serial.println("[MC Reset P1] PIECE_CLEARED: One piece moved from board to CZ.");
-        resetBoardIterator++; // Move to next board square
+    case RESET_P1_PIECE_CLEARED_TO_CZ:
+        Serial.println("[MC Reset P1] PIECE_CLEARED_TO_CZ. Iterating to next board square.");
+        resetBoardIterator++;
         currentState = RESET_P1_ITERATE_BOARD; stateStartTime = millis();
         break;
 
+    // === Phase 2: Place ALL Pieces from Capture Zone to Board Home ===
+    case RESET_P2_START:
+    Serial.println("[MC Reset P2] START: Placing ALL from CZ to Home -> RESET_P2_ITERATE_CZ");
+    resetCZIterator = 0; // Start iterating CZ from slot 0
+    currentState = RESET_P2_ITERATE_CZ;
+    stateStartTime = millis();
+    break;
 
-       // === Phase 2: Place K/Q from Capture Zone to Home ===
-       case RESET_P2_START:
-       Serial.println("[MC Reset P2] START: Placing K/Q from CZ to Home -> RESET_P2_ITERATE_CZ");
-       resetCZIterator = 0; // Start iterating CZ from slot 0
-       currentState = RESET_P2_ITERATE_CZ;
-       stateStartTime = millis();
-       break;
-
-   case RESET_P2_ITERATE_CZ:
-       Serial.print("[MC Reset P2] ITERATE_CZ: Slot "); Serial.println(resetCZIterator);
-       if (resetCZIterator >= 32) { // Done checking all CZ slots
-           Serial.println("  Phase 2 (Place K/Q from CZ) Complete -> RESET_P3_START");
-           currentState = RESET_P3_START; // Move to next phase
-           resetBoardIterator = 0; // Reset board iterator for P3
-           stateStartTime = millis();
-       } else {
-           currentState = RESET_P2_CHECK_CZ_PIECE; // Check current slot
-           stateStartTime = millis();
-       }
-       break;
-
-   case RESET_P2_CHECK_CZ_PIECE: {
-       bool pieceToPlace = false;
-       if (capture_zone[resetCZIterator].occupied) {
-           PieceType type = capture_zone[resetCZIterator].type;
-           PieceColor color = capture_zone[resetCZIterator].color;
-           if (type == PieceType::KING || type == PieceType::QUEEN) {
-               reset_targetHomeSquareCoords = getUnambiguousHomeSquare(type, color);
-               if (reset_targetHomeSquareCoords.first != -1) {
-                   // Check if the logical home square is empty
-                   if (board.grid[reset_targetHomeSquareCoords.first][reset_targetHomeSquareCoords.second] == nullptr) {
-                       reset_targetHomeSquareAlg = coordsToAlgebraic(reset_targetHomeSquareCoords.first, reset_targetHomeSquareCoords.second);
-                       Serial.print("  Found K/Q in CZ slot "); Serial.print(resetCZIterator);
-                       Serial.print(" for empty home "); Serial.print(reset_targetHomeSquareAlg); Serial.println(". Preparing move.");
-                       // Store piece info for move
-                       reset_pieceBeingMoved = capture_zone[resetCZIterator];
-                       pieceToPlace = true;
-                   } else {
-                       Serial.print("  K/Q in CZ slot "); Serial.print(resetCZIterator);
-                       Serial.print(", but home "); Serial.print(coordsToAlgebraic(reset_targetHomeSquareCoords.first, reset_targetHomeSquareCoords.second));
-                       Serial.println(" is logically occupied. Skipping.");
-                   }
-               }
-           } else { Serial.print("  Piece in CZ slot "); Serial.print(resetCZIterator); Serial.println(" is not K/Q. Skipping."); }
-       } else { Serial.print("  CZ slot "); Serial.print(resetCZIterator); Serial.println(" is empty. Skipping."); }
-
-       if (pieceToPlace) {
-           // Get stepper pos for current capture slot
-           if (getTargetForCapture(resetCZIterator + 1, reset_targetCZSlotPos)) { // Use reset_targetCZSlotPos
-                Serial.print("  Moving to grab from CZ slot pos: "); Serial.println(reset_targetCZSlotPos);
-                currentState = RESET_P2_MOVE_TO_CZ_SLOT;
-           } else {
-                Serial.println("!!! ERROR: Could not get stepper pos for CZ slot! Skipping piece.");
-                resetCZIterator++; currentState = RESET_P2_ITERATE_CZ;
-           }
-       } else {
-           resetCZIterator++; currentState = RESET_P2_ITERATE_CZ;
-       }
-       stateStartTime = millis();
+case RESET_P2_ITERATE_CZ:
+    Serial.print("[MC Reset P2] ITERATE_CZ: Slot "); Serial.println(resetCZIterator);
+    if (resetCZIterator >= 32) { // Done checking all CZ slots
+        Serial.println("  Phase 2 (Place ALL from CZ) Complete -> RESET_P3_START");
+        currentState = RESET_P3_START; // Move to next phase
+        resetBoardIterator = 0; // Reset board iterator if P3 uses it
+        stateStartTime = millis();
+    } else {
+        currentState = RESET_P2_CHECK_CZ_PIECE; // Check current slot
+        stateStartTime = millis();
     }
-       break;
+    break;
 
+case RESET_P2_CHECK_CZ_PIECE:{
+    bool pieceToPlaceFromCZ = false;
+    reset_targetHomeSquareCoords = {-1, -1}; // Reset target home
+
+    if (capture_zone[resetCZIterator].occupied) {
+        PieceType type = capture_zone[resetCZIterator].type;
+        PieceColor color = capture_zone[resetCZIterator].color;
+        Serial.print("  CZ Slot "); Serial.print(resetCZIterator); Serial.print(" has a ");
+        Serial.print(color == PieceColor::WHITE ? "W" : "B"); Serial.print((int)type); // Basic symbol
+
+        std::vector<std::pair<int, int>> potentialHomes = getPotentialHomeSquares(type, color);
+
+        for (const auto& home : potentialHomes) {
+            if (board.grid[home.first][home.second] == nullptr) { // Check if home square is logically empty
+                reset_targetHomeSquareCoords = home;
+                reset_targetHomeSquareAlg = coordsToAlgebraic(home.first, home.second);
+                Serial.print(". Found available home: "); Serial.println(reset_targetHomeSquareAlg);
+                reset_pieceBeingMoved = capture_zone[resetCZIterator]; // Store info of piece to move
+                pieceToPlaceFromCZ = true;
+                break; // Found a spot, stop checking other potential homes for this piece
+            }
+        }
+        if (!pieceToPlaceFromCZ) {
+            Serial.println(". No available home square on board. Skipping.");
+        }
+    } else { Serial.print("  CZ slot "); Serial.print(resetCZIterator); Serial.println(" is empty. Skipping."); }
+
+    if (pieceToPlaceFromCZ) {
+        if (getTargetForCapture(resetCZIterator + 1, reset_targetCZSlotPos)) {
+             Serial.print("  Moving to grab from CZ slot pos: "); Serial.println(reset_targetCZSlotPos);
+             currentState = RESET_P2_MOVE_TO_CZ_SLOT;
+        } else {
+             Serial.println("!!! ERROR: P2 Could not get stepper pos for CZ slot! Skipping.");
+             resetCZIterator++; currentState = RESET_P2_ITERATE_CZ;
+        }
+    } else {
+        resetCZIterator++; currentState = RESET_P2_ITERATE_CZ;
+    }
+    stateStartTime = millis();
+}
+    break;
    case RESET_P2_MOVE_TO_CZ_SLOT:
        Serial.println("[MC Reset P2] MOVE_TO_CZ_SLOT");
        enforceCaptureHomedForLowCart(CART_CAPTURE_POS); // Cart goes to CZ interaction pos
@@ -1039,121 +1129,116 @@ void MotionController::executeStateMachine() {
    case RESET_P2_WAIT_ROTATE_CZ_GRAB:
        if (timeInState >= 450) {
            Serial.println("  Rotated -> RESET_P2_PERFORM_CZ_GRAB_EXTEND");
-           currentState = RESET_P2_PERFORM_CZ_GRAB_EXTEND; stateStartTime = millis();
+           currentState = RESET_P2_GRAB_EXTEND_FROM_CZ; stateStartTime = millis();
        }
        break;
 
-   // --- "Take" sub-sequence from CZ (uses sensor check for retract) ---
-   case RESET_P2_PERFORM_CZ_GRAB_EXTEND:
-        Serial.println("[MC Reset P2] PERFORM_CZ_GRAB_EXTEND");
-        commandGripperOpen(); commandExtendActuator();
-        currentState = RESET_P2_WAIT_CZ_GRAB_EXTEND; stateStartTime = millis(); break;
-   case RESET_P2_WAIT_CZ_GRAB_EXTEND:
-        if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-            commandStopActuator(); currentState = RESET_P2_PERFORM_CZ_GRAB_CLOSE; stateStartTime = millis();
-        } break;
-   case RESET_P2_PERFORM_CZ_GRAB_CLOSE:
-        Serial.println("[MC Reset P2] PERFORM_CZ_GRAB_CLOSE");
-        commandGripperClose();
-        currentState = RESET_P2_WAIT_CZ_GRAB_CLOSE; stateStartTime = millis(); break;
-   case RESET_P2_WAIT_CZ_GRAB_CLOSE:
-        if (timeInState >= 300) {
-            // Use the same robust retract logic as in Phase 1.
-            // We need states to return to after the shared retract logic.
-            // For simplicity, duplicate the retract logic again or make it a true sub-state machine.
-            // Let's duplicate the core retract sequence, redirecting outcomes.
-            Serial.println("  Grab done -> RESET_P2_PERFORM_CZ_GRAB_RETRACT (Start retract check)");
-            currentState = RESET_P2_PERFORM_CZ_GRAB_RETRACT; // Go to dedicated P2 retract
-            stateStartTime = millis();
-        } break;
-
-   // --- Dedicated Retract with Sensor Check for Reset_P2 ---
-   case RESET_P2_PERFORM_CZ_GRAB_RETRACT: // Initial timed retract
-       Serial.println("[MC Reset P2] PERFORM_CZ_GRAB_RETRACT (Initial)");
+   // --- "Take" sub-sequence from CZ (with Robust Retract) ---
+   case RESET_P2_GRAB_EXTEND_FROM_CZ:
+   Serial.println("[MC Reset P2] GRAB_EXTEND_FROM_CZ");
+   commandGripperOpen(); commandExtendActuator();
+   currentState = RESET_P2_WAIT_GRAB_EXTEND_FROM_CZ; stateStartTime = millis(); break;
+case RESET_P2_WAIT_GRAB_EXTEND_FROM_CZ:
+   if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+       commandStopActuator(); currentState = RESET_P2_GRAB_CLOSE_FROM_CZ; stateStartTime = millis();
+   } break;
+case RESET_P2_GRAB_CLOSE_FROM_CZ:
+   Serial.println("[MC Reset P2] GRAB_CLOSE_FROM_CZ");
+   commandGripperClose();
+   currentState = RESET_P2_WAIT_GRAB_CLOSE_FROM_CZ; stateStartTime = millis(); break;
+case RESET_P2_WAIT_GRAB_CLOSE_FROM_CZ:
+   if (timeInState >= 300) {
+       Serial.println("  Grab from CZ done -> Starting Robust Retract for P2 Grab");
        commandRetractActuator();
        retractRetryCount = 0;
-       currentState = RESET_P2_WAIT_CZ_GRAB_RETRACT; // Wait for timed part
+       currentState = RESET_P2_GRAB_RETRACT_FROM_CZ;
        stateStartTime = millis();
-       break;
+   } break;
+case RESET_P2_GRAB_RETRACT_FROM_CZ: // Robust retract with sensor for P2
+  // Stage 0: Initial timed retract + first sensor check
+  if (retractRetryCount == 0) {
+      if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) {
+          Serial.print("  P2 Initial Retract time done. Sensor... ");
+          if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) {
+              Serial.println("Active! -> RESET_P2_CZ_GRAB_CONFIRMED");
+              commandStopActuator(); currentState = RESET_P2_CZ_GRAB_CONFIRMED;
+          } else {
+              Serial.println("Inactive. -> P2 Recovery: Rotate -5");
+              retractRetryCount = 1; commandStopActuator();
+              commandRotateGripper(constrain(servo1.read() - 5, 0, 180)); // Try other direction
+          }
+          stateStartTime = millis();
+      }
+  } else if (retractRetryCount == 1) { // Stage 1: After rotation, retry retract
+      if (timeInState >= 450) { // Wait for rotation, then start retract if not already
+           Serial.println("  P2 Rotated. Retrying retract...");
+           commandRetractActuator();
+      }
+      if (timeInState >= 450 + ACTUATOR_TRAVEL_TIME_MS + 150) { // After rotation + retry time
+          Serial.print("  P2 Retry Retract time done. Sensor... ");
+          if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) {
+              Serial.println("Active! -> RESET_P2_CZ_GRAB_CONFIRMED");
+              commandStopActuator(); currentState = RESET_P2_CZ_GRAB_CONFIRMED;
+          } else {
+              Serial.println("STILL Inactive! -> RESET_P2_CZ_GRAB_FAILED");
+              commandStopActuator(); currentState = RESET_P2_CZ_GRAB_FAILED;
+          }
+          stateStartTime = millis();
+      }
+  }
+  break;
 
-   case RESET_P2_WAIT_CZ_GRAB_RETRACT:
-       if (retractRetryCount == 0 && timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) {
-            Serial.print("  Initial P2 retract time elapsed. Checking sensor... ");
-            if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) { // Active  HIGH
-                Serial.println("Sensor Active! -> RESET_P2_CZ_GRAB_CONFIRMED");
-                commandStopActuator();
-                currentState = RESET_P2_CZ_GRAB_CONFIRMED;
-            } else {
-                Serial.println("Sensor Inactive. -> Attempting P2 recovery rotate.");
-                retractRetryCount = 1;
-                commandStopActuator();
-                commandRotateGripper(constrain(servo1.read() - 5, 0, 180)); // Rotate -5 (other direction)
-                delay(450); // TODO: Non-blocking wait state
-                Serial.println("  P2 Recovery rotate done. Retrying retract...");
-                commandRetractActuator();
-            }
-            stateStartTime = millis();
-       } else if (retractRetryCount == 1 && timeInState >= ACTUATOR_TRAVEL_TIME_MS + 150) {
-            Serial.print("  P2 Retry retract time elapsed. Checking sensor... ");
-            if (digitalRead(ACTUATOR_RETRACTED_SENSE_PIN) == HIGH) {
-                Serial.println("Sensor Active after retry! -> RESET_P2_CZ_GRAB_CONFIRMED");
-                commandStopActuator();
-                currentState = RESET_P2_CZ_GRAB_CONFIRMED;
-            } else {
-                Serial.println("Sensor STILL Inactive after P2 retry! -> RESET_P2_CZ_GRAB_FAILED");
-                commandStopActuator();
-                currentState = RESET_P2_CZ_GRAB_FAILED;
-            }
-            stateStartTime = millis();
-       }
-       break;
+case RESET_P2_CZ_GRAB_CONFIRMED:
+  Serial.println("[MC Reset P2] CZ_GRAB_CONFIRMED -> RESET_P2_UPDATE_CZ_ARRAY_AS_FREE");
+  currentState = RESET_P2_UPDATE_CZ_ARRAY_AS_FREE; stateStartTime = millis();
+  break;
+case RESET_P2_CZ_GRAB_FAILED:
+  Serial.println("!!! [MC Reset P2] CZ_GRAB_FAILED. Skipping CZ piece.");
+  resetCZIterator++; currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
+  break;
 
-   case RESET_P2_CZ_GRAB_CONFIRMED:
-       Serial.println("[MC Reset P2] CZ_GRAB_CONFIRMED: Piece taken from CZ -> RESET_P2_UPDATE_CZ_ARRAY_FREE");
-       currentState = RESET_P2_UPDATE_CZ_ARRAY_FREE; stateStartTime = millis();
-       break;
+case RESET_P2_UPDATE_CZ_ARRAY_AS_FREE:
+  Serial.print("[MC Reset P2] UPDATE_CZ_ARRAY_AS_FREE: Marking CZ slot "); Serial.print(resetCZIterator); Serial.println(" free.");
+  if (resetCZIterator >= 0 && resetCZIterator < 32) {
+      capture_zone[resetCZIterator].occupied = false;
+      // No need to clear piece type/color, 'occupied' is the flag.
+  }
+  currentState = RESET_P2_ROTATE_AWAY_CZ_TO_BOARD; stateStartTime = millis();
+  break;
 
-   case RESET_P2_CZ_GRAB_FAILED:
-       Serial.println("!!! [MC Reset P2] CZ_GRAB_FAILED: Could not confirm retract. Skipping CZ piece.");
-       resetCZIterator++; // Move to next CZ slot
-       currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
-       break;
+case RESET_P2_ROTATE_AWAY_CZ_TO_BOARD:
+  Serial.println("[MC Reset P2] ROTATE_AWAY_CZ_TO_BOARD");
+  commandRotateGripper(GRIPPER_ROT_BOARD);
+  currentState = RESET_P2_WAIT_ROTATE_AWAY_CZ_TO_BOARD; stateStartTime = millis();
+  break;
 
-   case RESET_P2_UPDATE_CZ_ARRAY_FREE:
-       Serial.print("[MC Reset P2] UPDATE_CZ_ARRAY_FREE: Marking CZ slot "); Serial.print(resetCZIterator); Serial.println(" free.");
-       if (resetCZIterator >= 0 && resetCZIterator < 32) {
-           capture_zone[resetCZIterator].occupied = false;
-       }
-       // Rotate gripper back to board angle before moving Cart/Orb
-       commandRotateGripper(GRIPPER_ROT_BOARD);
-       currentState = RESET_P2_ROTATE_AWAY_CZ; stateStartTime = millis();
-       break;
+case RESET_P2_WAIT_ROTATE_AWAY_CZ_TO_BOARD:
+  if (timeInState >= 450) {
+      Serial.println("  Rotated for board -> RESET_P2_MOVE_TO_HOME_SQUARE");
+      currentState = RESET_P2_MOVE_TO_HOME_SQUARE; stateStartTime = millis();
+  }
+  break;
 
-   case RESET_P2_ROTATE_AWAY_CZ:
-       if (timeInState >= 450) {
-           Serial.println("  Rotated for board -> RESET_P2_MOVE_TO_HOME_SQUARE");
-           currentState = RESET_P2_MOVE_TO_HOME_SQUARE; stateStartTime = millis();
-       }
-       break;
+case RESET_P2_MOVE_TO_HOME_SQUARE:
+stepper1.setMaxSpeed(STEPPER_SPEED); stepper1.setAcceleration(STEPPER_ACCEL);
+            stepper2.setMaxSpeed(STEPPER_SPEED); stepper2.setAcceleration(STEPPER_ACCEL);
+            stepper3.setMaxSpeed(STEPPER_SPEED); stepper3.setAcceleration(STEPPER_ACCEL); // <<<
+  Serial.print("[MC Reset P2] MOVE_TO_HOME_SQUARE: Moving piece to "); Serial.println(reset_targetHomeSquareAlg);
+  getTargetsForSquare(reset_targetHomeSquareAlg, targetOrb1, targetCart1);
+  enforceCaptureHomedForLowCart(targetCart1);
+  enforceCartSafetyRotation(targetCart1);
+  stepper1.moveTo(0); stepper2.moveTo(targetCart1); stepper3.moveTo(targetOrb1);
+  stepper1.enableOutputs(); stepper2.enableOutputs(); stepper3.enableOutputs();
+  currentState = RESET_P2_WAIT_HOME_SQUARE_POS; stateStartTime = millis();
+  break;
 
-   case RESET_P2_MOVE_TO_HOME_SQUARE:
-       Serial.print("[MC Reset P2] MOVE_TO_HOME_SQUARE: Moving K/Q to "); Serial.println(reset_targetHomeSquareAlg);
-       getTargetsForSquare(reset_targetHomeSquareAlg, targetOrb1, targetCart1); // Use target1 vars
-       enforceCaptureHomedForLowCart(targetCart1); // Safety for destination
-       enforceCartSafetyRotation(targetCart1);   // Safety for destination
-       stepper1.moveTo(0); // Capture motor home
-       stepper2.moveTo(targetCart1);
-       stepper3.moveTo(targetOrb1);
-       stepper1.enableOutputs(); stepper2.enableOutputs(); stepper3.enableOutputs();
-       currentState = RESET_P2_WAIT_HOME_SQUARE_POS; stateStartTime = millis();
-       break;
+case RESET_P2_WAIT_HOME_SQUARE_POS:
+  if (stepper1.distanceToGo()==0 && stepper2.distanceToGo()==0 && stepper3.distanceToGo()==0) {
+      Serial.println("  Arrived at home square -> RESET_P2_ROTATE_FOR_HOME_RELEASE");
+      currentState = RESET_P2_ROTATE_FOR_HOME_RELEASE; stateStartTime = millis();
+  }
+  break;
 
-   case RESET_P2_WAIT_HOME_SQUARE_POS:
-       if (stepper1.distanceToGo()==0 && stepper2.distanceToGo()==0 && stepper3.distanceToGo()==0) {
-           Serial.println("  Arrived at home square -> RESET_P2_ROTATE_FOR_HOME_RELEASE");
-           currentState = RESET_P2_ROTATE_FOR_HOME_RELEASE; stateStartTime = millis();
-       }
-       break;
 
    case RESET_P2_ROTATE_FOR_HOME_RELEASE:
        Serial.println("[MC Reset P2] ROTATE_FOR_HOME_RELEASE");
@@ -1164,48 +1249,57 @@ void MotionController::executeStateMachine() {
    case RESET_P2_WAIT_ROTATE_HOME_RELEASE:
        if (timeInState >= 450) { // Even if no rotation, ensures sequencing
            Serial.println("  Rotated -> RESET_P2_PERFORM_HOME_RELEASE_EXTEND");
-           currentState = RESET_P2_PERFORM_HOME_RELEASE_EXTEND; stateStartTime = millis();
+           currentState = RESET_P2_RELEASE_EXTEND_ON_BOARD; stateStartTime = millis();
        }
        break;
 
-   // --- "Release" sub-sequence onto board for P2 (simple timed retract) ---
-   case RESET_P2_PERFORM_HOME_RELEASE_EXTEND:
-        Serial.println("[MC Reset P2] PERFORM_HOME_RELEASE_EXTEND");
-        commandExtendActuator(); currentState = RESET_P2_WAIT_HOME_RELEASE_EXTEND; stateStartTime = millis(); break;
-   case RESET_P2_WAIT_HOME_RELEASE_EXTEND:
-        if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-            commandStopActuator(); currentState = RESET_P2_PERFORM_HOME_RELEASE_OPEN; stateStartTime = millis();
-        } break;
-   case RESET_P2_PERFORM_HOME_RELEASE_OPEN:
-         Serial.println("[MC Reset P2] PERFORM_HOME_RELEASE_OPEN");
-         commandGripperOpen(); currentState = RESET_P2_WAIT_HOME_RELEASE_OPEN; stateStartTime = millis(); break;
-   case RESET_P2_WAIT_HOME_RELEASE_OPEN:
-        if (timeInState >= 300) {
-            currentState = RESET_P2_PERFORM_HOME_RELEASE_RETRACT; stateStartTime = millis();
-        } break;
-   case RESET_P2_PERFORM_HOME_RELEASE_RETRACT:
-        Serial.println("[MC Reset P2] PERFORM_HOME_RELEASE_RETRACT (Timed)");
-        commandRetractActuator(); currentState = RESET_P2_WAIT_HOME_RELEASE_RETRACT; stateStartTime = millis(); break;
-   case RESET_P2_WAIT_HOME_RELEASE_RETRACT:
-        if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
-            commandStopActuator();
-            Serial.println("  Release on home square done -> RESET_P2_PIECE_PLACED");
-            currentState = RESET_P2_PIECE_PLACED; stateStartTime = millis();
-        } break;
+    // --- "Release" sub-sequence onto board for P2 (simple timed retract) ---
+    case RESET_P2_RELEASE_EXTEND_ON_BOARD:
+    Serial.println("[MC Reset P2] RELEASE_EXTEND_ON_BOARD");
+    commandExtendActuator(); currentState = RESET_P2_WAIT_RELEASE_EXTEND_ON_BOARD; stateStartTime = millis(); break;
+case RESET_P2_WAIT_RELEASE_EXTEND_ON_BOARD:
+    if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+        commandStopActuator(); currentState = RESET_P2_RELEASE_OPEN_ON_BOARD; stateStartTime = millis();
+    } break;
+case RESET_P2_RELEASE_OPEN_ON_BOARD:
+     Serial.println("[MC Reset P2] RELEASE_OPEN_ON_BOARD");
+     commandGripperOpen(); currentState = RESET_P2_WAIT_RELEASE_OPEN_ON_BOARD; stateStartTime = millis(); break;
+case RESET_P2_WAIT_RELEASE_OPEN_ON_BOARD:
+    if (timeInState >= 300) {
+        currentState = RESET_P2_RELEASE_RETRACT_ON_BOARD; stateStartTime = millis();
+    } break;
+case RESET_P2_RELEASE_RETRACT_ON_BOARD:
+    Serial.println("[MC Reset P2] RELEASE_RETRACT_ON_BOARD (Timed)");
+    commandRetractActuator(); currentState = RESET_P2_WAIT_RELEASE_RETRACT_ON_BOARD; stateStartTime = millis(); break;
+case RESET_P2_WAIT_RELEASE_RETRACT_ON_BOARD:
+    if (timeInState >= ACTUATOR_TRAVEL_TIME_MS + 50) {
+        commandStopActuator();
+        Serial.println("  Release on home square done -> RESET_P2_UPDATE_LOGICAL_BOARD");
+        currentState = RESET_P2_UPDATE_LOGICAL_BOARD; stateStartTime = millis();
+    } break;
 
-        case RESET_P2_PIECE_PLACED:
-        Serial.println("[MC Reset P2] PIECE_PLACED: K/Q moved from CZ to board.");
-        // Update logical board: Add the piece that was just placed
-        if (reset_targetHomeSquareCoords.first != -1 && reset_pieceBeingMoved.occupied) {
-            Serial.print("  Logically placing piece type "); Serial.print((int)reset_pieceBeingMoved.type);
-            Serial.print(" at "); Serial.println(coordsToAlgebraic(reset_targetHomeSquareCoords.first, reset_targetHomeSquareCoords.second));
-            board.addPiece(reset_pieceBeingMoved.type, reset_pieceBeingMoved.color, reset_targetHomeSquareCoords);
-            reset_pieceBeingMoved.occupied = false; // Clear for next use
-            reset_targetHomeSquareCoords = {-1,-1};
-        }
-        resetCZIterator++;
-        currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
-        break;
+case RESET_P2_UPDATE_LOGICAL_BOARD:
+   Serial.println("[MC Reset P2] UPDATE_LOGICAL_BOARD");
+   if (reset_targetHomeSquareCoords.first != -1 && reset_pieceBeingMoved.occupied) {
+       Serial.print("  Logically placing type "); Serial.print((int)reset_pieceBeingMoved.type);
+       Serial.print(" at "); Serial.println(reset_targetHomeSquareAlg);
+       // Ensure square is actually empty before adding, though CHECK_CZ_PIECE should have done this.
+       if (board.grid[reset_targetHomeSquareCoords.first][reset_targetHomeSquareCoords.second] == nullptr) {
+           board.addPiece(reset_pieceBeingMoved.type, reset_pieceBeingMoved.color, reset_targetHomeSquareCoords);
+       } else {
+           Serial.println("  !!! WARNING: Target home square was not empty logically before P2 addPiece!");
+       }
+       reset_pieceBeingMoved.occupied = false; // Mark as processed
+   }
+   currentState = RESET_P2_PIECE_PLACED_ON_BOARD; stateStartTime = millis();
+   break;
+
+case RESET_P2_PIECE_PLACED_ON_BOARD:
+   Serial.println("[MC Reset P2] PIECE_PLACED_ON_BOARD. Iterating to next CZ slot.");
+   resetCZIterator++;
+   currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
+   break;
+
 
 
      // === Phase 3: Place Misplaced Pieces from Board to Home ===
@@ -1345,6 +1439,7 @@ void MotionController::executeStateMachine() {
     case RESET_P4_LOGICAL_BOARD_RESET:
         Serial.println("[MC Reset P4] LOGICAL_BOARD_RESET");
         board.resetBoard(); // Reset logical board state
+        resetInternalCaptureZoneState(); // <<<=== CALL METHOD TO RESET CAPTURE ZONE ARRAY
         board.printBoard();
         currentState = RESET_P4_UPDATE_NEXTION; stateStartTime = millis();
         break;
@@ -1586,8 +1681,16 @@ void MotionController::executeStateMachine() {
 
         case DO_MOVE_STEPPERS_TO_SOURCE:
             Serial.println("[MC State] DO_MOVE_STEPPERS_TO_SOURCE: Commanding...");
-             stepper1.moveTo(targetCapt1); stepper2.moveTo(targetCart1); stepper3.moveTo(targetOrb1);
-             stepper1.enableOutputs(); stepper2.enableOutputs(); stepper3.enableOutputs();
+            stepper1.setMaxSpeed(STEPPER_SPEED); stepper1.setAcceleration(STEPPER_ACCEL);
+             stepper2.setMaxSpeed(STEPPER_SPEED); stepper2.setAcceleration(STEPPER_ACCEL);
+             stepper3.setMaxSpeed(STEPPER_SPEED); stepper3.setAcceleration(STEPPER_ACCEL); // <<< ENSURE FOR ORB
+
+             stepper1.moveTo(targetCapt1); 
+             stepper2.moveTo(targetCart1); 
+             stepper3.moveTo(targetOrb1);
+             stepper1.enableOutputs(); 
+             stepper2.enableOutputs(); 
+             stepper3.enableOutputs();
              currentState = DO_WAIT_STEPPERS_SOURCE; stateStartTime = millis();
              break; // <<<=== MUST Break here to wait
 
@@ -1788,7 +1891,11 @@ void MotionController::executeStateMachine() {
              break; // <<<=== Keep waiting or transition
 
         case DO_MOVE_STEPPERS_TO_DEST:
+        
             Serial.println("[MC State] DO_MOVE_STEPPERS_TO_DEST: Commanding...");
+            stepper1.setMaxSpeed(STEPPER_SPEED); stepper1.setAcceleration(STEPPER_ACCEL);
+            stepper2.setMaxSpeed(STEPPER_SPEED); stepper2.setAcceleration(STEPPER_ACCEL);
+            stepper3.setMaxSpeed(STEPPER_SPEED); stepper3.setAcceleration(STEPPER_ACCEL); // <<< ENSURE FOR ORB
             if (locType2 == LOC_CAPTURE) {
                 stepper1.moveTo(targetCapt2); // Fixed target
                 stepper1.enableOutputs();
