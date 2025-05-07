@@ -47,10 +47,11 @@ void readCredentials() {
     prefs.end();
   }
 
-
+void force_nextion_refresh();
 /////////////////////////////////// NEXTION //////////////
 EasyNex nextion(Serial2);
 bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
+bool forceNextionFullRefresh = false; 
 /////////////////////////////////////
 
 ////////////////////////////// TIMERS ///////////////////////////////
@@ -78,15 +79,26 @@ std::pair<int, int> currentMoveFromCoords = {-1, -1};
 std::pair<int, int> currentMoveToCoords = {-1, -1};
 // --- Struct to Store Last Processed Command ---
 struct LastCommandInfo {
-    bool isValid = false; // Flag to indicate if the data is for a valid, processed command
+    bool isValid = false;
     std::pair<int, int> fromCoords = {-1, -1};
     std::pair<int, int> toCoords = {-1, -1};
-    bool wasCapture = false; // Did the original 'to' square have a piece?
+    bool wasCapture = false;
+
+    // --- Fields for Special Moves ---
+    bool isSpecialMove = false; // General flag
+    SPECIAL_MOVES specialMoveType = SPECIAL_MOVES::NONE; // Store the type
+    PieceType promotionPieceType = PieceType::QUEEN; // Store the type to promote to (Default Queen)
+
+    // --- Fields for disabled special moves (keep commented out or remove) ---
+    // std::pair<int, int> special_rookFrom = {-1, -1};
+    // std::pair<int, int> special_rookTo = {-1, -1};
+    // std::pair<int, int> special_capturedPawnPos = {-1, -1};
 };
 
 LastCommandInfo lastCommandProcessed; // Global instance to store the info
 bool currentMoveIsCapture = false; // Flag if the current command involved a capture
-// ... (generate_orb_code remains the same) ...
+bool resetBoardAfterHoming = false; // Flag to trigger board reset after homing completes
+
 String generate_orb_code() {
     String code = "";
 
@@ -129,20 +141,20 @@ void send_orb_status_update() {
 
 // --- Reset Orb Function ---
 void reset_orb() {
-    // status = IDLE; // Status is now derived
-    GAME_ID = "";
-    PLAYER_NAMES[0] = "";
-    PLAYER_NAMES[1] = "";
-
-    board.resetBoard(); // Reset logical board
-    ORB_CODE = generate_orb_code(); // Generate new code on reset
-
-    // TODO: Reset motion controller state if needed? It should return to IDLE naturally.
-    // motionController.resetState(); // Might need a reset function
-
-    send_orb_status_update(); 
-    nextion.writeStr("page home_screen"); 
-    nextion.lastCurrentPageId = 255; 
+    GAME_ID = ""; PLAYER_NAMES[0] = ""; PLAYER_NAMES[1] = "";
+    // Don't reset logical board here yet
+    // board.resetBoard();
+    ORB_CODE = generate_orb_code();
+    force_nextion_refresh();
+    Serial.println("Reset requested. Initiating Homing Sequence first...");
+    if (motionController.startHomingSequence()) {
+        resetBoardAfterHoming = true; // Set flag to run board reset AFTER homing
+        send_orb_status_update(); // Send OCCUPIED (due to homing)
+    } else {
+         Serial.println("Could not start homing (already busy?). Board reset skipped.");
+         resetBoardAfterHoming = false;
+    }
+    
 }
 
 
@@ -168,9 +180,15 @@ void update_nextion_game_info() {
     nextion.writeStr("txt_p2_name.txt", PLAYER_NAMES[1]);
 
 }
+
+
 void load_nextion_page(){ // This function's purpose is to update the values of a new page when is first loaded,
         // and refreshing all the components with the current values as Nextion shows the Attribute val.
-
+    if (forceNextionFullRefresh) {
+        nextion.lastCurrentPageId = -1; // Force all components to update
+        forceNextionFullRefresh = false; // Reset flag
+        Serial.println("Forcing Nextion full page refresh.");
+    }
     if(nextion.currentPageId != nextion.lastCurrentPageId){ // If the two variables are different, means a new page is loaded.
 
     newPageLoaded = true;    // A new page is loaded
@@ -232,6 +250,11 @@ void load_nextion_page(){ // This function's purpose is to update the values of 
 }
 
 
+
+void force_nextion_refresh() {
+    forceNextionFullRefresh=true;
+    load_nextion_page();
+}
 // --- WebSocket Message Handler ---
 void handle_data(WebsocketsMessage packet) {
     String json_data = packet.data();
@@ -315,35 +338,61 @@ void handle_data(WebsocketsMessage packet) {
             int xfrom = fromArr[0].as<int>(); int yfrom = fromArr[1].as<int>();
             int xto = toArr[0].as<int>(); int yto = toArr[1].as<int>();
 
-            // --- Store Command Details ---
-            lastCommandProcessed.fromCoords = {xfrom, yfrom};
-            lastCommandProcessed.toCoords = {xto, yto};
-            lastCommandProcessed.wasCapture = (board.grid[xto][yto] != nullptr); // Check board *before* move starts
-            lastCommandProcessed.isValid = true; // Mark data as valid for post-move update
-            // TODO: Parse and store special move data here later
-
-            // --- Convert to Algebraic for Motion Controller ---
-            String fromAlg = board.getSquareString(lastCommandProcessed.fromCoords);
-            String toAlg = board.getSquareString(lastCommandProcessed.toCoords);
-            Serial.print("  Parsed Move: "); Serial.print(fromAlg); Serial.print(" -> "); Serial.println(toAlg);
-            if (lastCommandProcessed.wasCapture) { Serial.println("  (Is a capture)"); }
-
-            // --- Initiate Physical Move ---
-            // MotionController's start sequence will internally re-check for capture if needed
-            bool sequenceStarted = motionController.startMoveSequence(fromAlg, toAlg);
-            if (sequenceStarted) {
-                Serial.println("  Physical move sequence initiated.");
-                send_orb_status_update(); // Send OCCUPIED status
-            } else {
-                Serial.println("  Failed to initiate physical move sequence.");
-                // Invalidate stored command data if sequence didn't start
-                lastCommandProcessed.isValid = false;
-            }
-        } break;
-
-        default:
-            Serial.print("Unhandled message type: "); Serial.println(type);
-            break;
+             // --- Store Command Details ---
+             lastCommandProcessed.isValid = true; // Assume valid until sequence fails
+             lastCommandProcessed.fromCoords = {xfrom, yfrom};
+             lastCommandProcessed.toCoords = {xto, yto};
+             lastCommandProcessed.wasCapture = (board.grid[xto][yto] != nullptr);
+             lastCommandProcessed.isSpecialMove = false; // Default
+             lastCommandProcessed.specialMoveType = SPECIAL_MOVES::NONE; // Default
+ 
+             // --- Check for Special Move Details ---
+             if (data.containsKey("special_move") && data["special_move"].is<JsonObject>()) {
+                 JsonObject specialMoveData = data["special_move"];
+                 if (specialMoveData.containsKey("type")) {
+                     int specialTypeInt = specialMoveData["type"].as<int>();
+                     // Map integer from JSON to SPECIAL_MOVES enum
+                     if (specialTypeInt == (int)SPECIAL_MOVES::PROMOTION) { // Check specifically for PROMOTION
+                         lastCommandProcessed.isSpecialMove = true;
+                         lastCommandProcessed.specialMoveType = SPECIAL_MOVES::PROMOTION;
+                         Serial.println("  *PROMOTION DETECTED*");
+ 
+                         // Get the piece type to promote to (assuming it's sent as string or enum value)
+                         // Example: Assuming server sends "QUEEN", "ROOK", etc.
+                         if (specialMoveData.containsKey("promoted_to_type")) {
+                             String promotedTypeStr = specialMoveData["promoted_to_type"].as<String>();
+                             promotedTypeStr.toUpperCase();
+                             if (promotedTypeStr == "QUEEN") lastCommandProcessed.promotionPieceType = PieceType::QUEEN;
+                             else if (promotedTypeStr == "ROOK") lastCommandProcessed.promotionPieceType = PieceType::ROOK;
+                             else if (promotedTypeStr == "BISHOP") lastCommandProcessed.promotionPieceType = PieceType::BISHOP;
+                             else if (promotedTypeStr == "KNIGHT") lastCommandProcessed.promotionPieceType = PieceType::KNIGHT;
+                             else lastCommandProcessed.promotionPieceType = PieceType::QUEEN; // Default to Queen on error
+                             Serial.print("  Promoting to: "); Serial.println(promotedTypeStr);
+                         } else {
+                              lastCommandProcessed.promotionPieceType = PieceType::QUEEN; // Default if not specified
+                              Serial.println("  Promotion type not specified, defaulting to QUEEN.");
+                         }
+                     }
+                     // Add checks for other special moves here later if needed
+                 }
+             }
+ 
+             // --- Convert to Algebraic & Start Sequence ---
+             String fromAlg = board.getSquareString(lastCommandProcessed.fromCoords);
+             String toAlg = board.getSquareString(lastCommandProcessed.toCoords);
+             Serial.print("  Parsed Move: "); Serial.print(fromAlg); Serial.print(" -> "); Serial.println(toAlg);
+             if (lastCommandProcessed.wasCapture) { Serial.println("  (Is a capture)"); }
+ 
+             // Start the standard move sequence - MotionController doesn't need special handling for this version
+             bool sequenceStarted = motionController.startMoveSequence(fromAlg, toAlg);
+             if (sequenceStarted) {
+                 Serial.println("  Physical move sequence initiated.");
+                 send_orb_status_update();
+             } else {
+                 Serial.println("  Failed to initiate physical move sequence.");
+                 lastCommandProcessed.isValid = false; // Invalidate data
+             }
+         } break;
     }
 }
 
@@ -412,9 +461,7 @@ void setup() {
         }
     }
 
-    nextion.lastCurrentPageId = -1;
-    nextion.writeStr("page home_screen"); // Go to home screen on boot
-    load_nextion_page();
+    force_nextion_refresh();
 }
 
 void loop() {
@@ -429,55 +476,96 @@ void loop() {
     static MotionState lastMotionState = MOTION_IDLE;
     MotionState currentMotionState = motionController.getCurrentState();
 
-    // Check if the state just transitioned *to* IDLE from a non-IDLE state
     if (lastMotionState != MOTION_IDLE && currentMotionState == MOTION_IDLE) {
-        Serial.print("MotionController transitioned from state ");
-        Serial.print(lastMotionState); // State it came FROM
+        Serial.print("MotionController transitioned from state "); Serial.print(lastMotionState);
         Serial.println(" to MOTION_IDLE.");
-
-        // Always send IDLE status update when becoming idle
         send_orb_status_update();
 
         // --- Post-Sequence Updates ---
-        // Check if the sequence that just finished was a move AND we have valid stored data
-        if (lastMotionState == DO_COMPLETE && lastCommandProcessed.isValid) {
-            Serial.println("Executing Post-Move Updates (Board Logic, Nextion)...");
+        if ((lastMotionState == DO_COMPLETE /*|| lastMotionState == PROMOTION_COMPLETE - No special state needed */)
+             && lastCommandProcessed.isValid)
+        {
+             Serial.println("Executing Post-Move/Promotion Updates...");
 
-            // Use the globally stored coordinates from the completed command
-            std::pair<int, int> from = lastCommandProcessed.fromCoords;
-            std::pair<int, int> to = lastCommandProcessed.toCoords;
-            String fromStr = board.getSquareString(from); // For logging
-            String toStr = board.getSquareString(to);     // For logging
+             std::pair<int, int> from = lastCommandProcessed.fromCoords;
+             std::pair<int, int> to = lastCommandProcessed.toCoords;
+             String fromStr = board.getSquareString(from);
+             String toStr = board.getSquareString(to);
 
-            Serial.print("  Updating logical board for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
-            // Update Logical Board FIRST - board.movePiece handles internal capture logic
-            bool moveSuccess = board.movePiece(from, to);
-            if (!moveSuccess) {
-                Serial.println("!!! WARNING: Logical board move failed! Board state might be inconsistent.");
-            }
-            board.printBoard(); // Print updated logical board state
+             // --- Logical Board Update ---
+             Serial.print("  Updating logical board for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
+             // Delete whatever is at the 'to' square (handles captures)
+             delete board.grid[to.first][to.second];
+             board.grid[to.first][to.second] = nullptr;
+             // Get the piece that moved (should be the pawn)
+             Piece* movingPiece = board.grid[from.first][from.second];
+             if (movingPiece == nullptr) {
+                Serial.println("!!! ERROR: No piece found at 'from' square for logical update!");
+             } else {
+                 // Remove piece pointer from 'from' square
+                 board.grid[from.first][from.second] = nullptr;
 
-            Serial.print("  Updating Nextion display for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
-            // Update Nextion Display SECOND
-            move_nextion_piece(from, to);
+                 // Check if it was a promotion
+                 if (lastCommandProcessed.isSpecialMove && lastCommandProcessed.specialMoveType == SPECIAL_MOVES::PROMOTION) {
+                     Serial.print("  Promotion! Deleting Pawn, Adding new piece type: ");
+                     Serial.println((int)lastCommandProcessed.promotionPieceType); // Print enum value for debug
+                     PieceColor color = movingPiece->getColor(); // Get color from the original pawn
+                     delete movingPiece; // Delete the original Pawn object
 
-            // Invalidate the stored command data now that it has been processed
-            lastCommandProcessed.isValid = false;
-            Serial.println("  Post-move updates complete.");
+                     // Add the NEW promoted piece to the 'to' square
+                     board.addPiece(lastCommandProcessed.promotionPieceType, color, to);
+
+                 } else {
+                     // Normal move: Place the original piece pointer at the 'to' square
+                     board.grid[to.first][to.second] = movingPiece;
+                     // Update the piece's internal position tracker
+                     movingPiece->setPosition(to);
+                 }
+             }
+             board.printBoard(); // Print updated logical board state
+
+             // --- Nextion Display Update ---
+             Serial.print("  Updating Nextion display for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
+              // Clear the 'from' square visually
+             String nextionFromSquare = fromStr + ".picc";
+             nextion.writeNum(nextionFromSquare, 1); // Assuming 1 is empty square pic id
+
+             // Set the 'to' square visually with the *final* piece's ID
+             String nextionToSquare = toStr + ".picc";
+             int finalPieceNextionId = board.getSquareNextionId(to); // Get ID of piece now at 'to'
+             nextion.writeNum(nextionToSquare, finalPieceNextionId);
+
+
+             // Invalidate the stored command data now that it has been processed
+             lastCommandProcessed.isValid = false;
+             Serial.println("  Post-move updates complete.");
 
         } else if (lastMotionState == HOMING_COMPLETE) {
-            Serial.println("Homing sequence completed. No board updates needed.");
-            // Ensure command data is invalid after homing too
-            lastCommandProcessed.isValid = false;
-        } else if (lastCommandProcessed.isValid){
-            // Became IDLE from a state other than DO_COMPLETE or HOMING_COMPLETE (e.g., ERROR)
-            // Invalidate data to prevent accidental updates later
+            Serial.println("Homing sequence completed.");
+             // --- Check if we need to trigger board reset ---
+             if (resetBoardAfterHoming) {
+                 Serial.println("Triggering Board Reset Sequence now...");
+                 resetBoardAfterHoming = false; // Clear the flag
+                 if (motionController.startBoardResetSequence()) {
+                      send_orb_status_update(); // Send OCCUPIED (due to reset sequence)
+                 } else {
+                      Serial.println("Failed to start Board Reset sequence!");
+                 }
+             }
+             lastCommandProcessed.isValid = false; // Ensure invalid after homing
+        } else if (lastMotionState == RESET_COMPLETE) { // <<< Check if RESET finished
+            Serial.println("Board Reset Sequence Completed.");
+            lastCommandProcessed.isValid = false; // Ensure invalid after reset
+            if (nextion.currentPageId == BOARD_SCREEN) { // Only force if on board screen
+                forceNextionFullRefresh = true; // Set flag for next load_nextion_page call
+            }
+
+       } else if (lastCommandProcessed.isValid){
             Serial.println("Became IDLE unexpectedly. Invalidating last command data.");
             lastCommandProcessed.isValid = false;
-        }
+       }
     }
-    // Update the tracked state for the next iteration
-    lastMotionState = currentMotionState;
+    lastMotionState = currentMotionState; // Update tracker
 
 
     // Handle WebSocket polling less frequently

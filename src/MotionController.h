@@ -13,7 +13,7 @@
 // --- Constants (Motion Specific) ---
 const float STEPPER_SPEED = 4000;
 const float STEPPER_ACCEL = 5000;
-const float HOMING_SPEED_CAPTURE = 800;
+const float HOMING_SPEED_CAPTURE = 1000;
 const float HOMING_SPEED_CART_ORB = 1000;
 const float HOMING_ACCEL = 1500;
 
@@ -23,7 +23,7 @@ const long CART_SAFETY_THRESHOLD = 2250;
 const long CART_CAPTURE_HOME_THRESHOLD = 800;
 const long CART_CAPTURE_POS = 2250;
 
-const int GripperOpen = 180;
+const int GripperOpen = 160;
 const int GripperClose = 50;
 
 const unsigned long ACTUATOR_TRAVEL_TIME_MS = 600;
@@ -119,6 +119,87 @@ enum MotionState {
     DO_PERFORM_RELEASE_RETRACT,
     DO_WAIT_RELEASE_RETRACT,
     DO_COMPLETE,
+    // --- FULL BOARD RESET STATES ---
+    RESET_START,
+    // === Phase 1: Clear Board (Non K/Q) to Capture Zone ===
+    RESET_P1_ITERATE_BOARD,         // Iterate through board squares (0-63)
+    RESET_P1_CHECK_SQUARE,          // Check piece at current board square
+    RESET_P1_MOVE_TO_GRAB_PIECE,    // Move Cart/Orb to current board piece
+    RESET_P1_WAIT_GRAB_PIECE_POS,
+    RESET_P1_ROTATE_FOR_GRAB,       // Rotate gripper (usually to board angle 0)
+    RESET_P1_WAIT_ROTATE_GRAB,
+    RESET_P1_PERFORM_GRAB_EXTEND,   // Start "Take" sub-sequence for board piece
+    RESET_P1_WAIT_GRAB_EXTEND,
+    RESET_P1_PERFORM_GRAB_CLOSE,
+    RESET_P1_WAIT_GRAB_CLOSE,
+    RESET_P1_PERFORM_GRAB_RETRACT,  // Needs retract confirmation!
+    RESET_P1_WAIT_GRAB_RETRACT,     // Needs retract confirmation!
+    RESET_P1_GRAB_CONFIRMED,        // Piece successfully grabbed from board
+    RESET_P1_GRAB_FAILED,           // Failed to grab (e.g., retract sensor issue)
+    RESET_P1_ROTATE_AWAY_BOARD,     // Rotate gripper back to safe (0) before moving to CZ
+    RESET_P1_WAIT_ROTATE_AWAY,
+    RESET_P1_MOVE_TO_CZ_DROPOFF,    // Move Cart to capture zone dropoff position
+    RESET_P1_WAIT_CZ_DROPOFF,
+    RESET_P1_FIND_CZ_SLOT,          // Find an available slot in capture_zone array
+    RESET_P1_MOVE_CZ_MOTOR_TO_SLOT, // Move Capture stepper to the found slot
+    RESET_P1_WAIT_CZ_MOTOR,
+    RESET_P1_ROTATE_FOR_CZ_RELEASE, // Rotate gripper for capture zone interaction
+    RESET_P1_WAIT_ROTATE_CZ_RELEASE,
+    RESET_P1_PERFORM_RELEASE_EXTEND,// Start "Release" sub-sequence into CZ
+    RESET_P1_WAIT_RELEASE_EXTEND,
+    RESET_P1_PERFORM_RELEASE_OPEN,
+    RESET_P1_WAIT_RELEASE_OPEN,
+    RESET_P1_PERFORM_RELEASE_RETRACT,
+    RESET_P1_WAIT_RELEASE_RETRACT,
+    RESET_P1_UPDATE_CZ_ARRAY,       // Mark the slot as occupied with piece info
+    RESET_P1_PIECE_CLEARED,         // Finished clearing one piece
+
+    // === Phase 2: Place K/Q from Capture Zone to Home (Implement LATER) ===
+      // === Phase 2: Place K/Q from Capture Zone to Home ===
+      RESET_P2_START,                 // Entry point for Phase 2
+      RESET_P2_ITERATE_CZ,            // Iterate through capture_zone (0-31)
+      RESET_P2_CHECK_CZ_PIECE,        // Check if piece in CZ slot is K/Q and home is free
+      RESET_P2_MOVE_TO_CZ_SLOT,       // Move Cart/Capture to grab K/Q from slot
+      RESET_P2_WAIT_CZ_SLOT_POS,
+      RESET_P2_ROTATE_FOR_CZ_GRAB,
+      RESET_P2_WAIT_ROTATE_CZ_GRAB,
+      RESET_P2_PERFORM_CZ_GRAB_EXTEND,// "Take" sub-sequence for CZ piece
+      RESET_P2_WAIT_CZ_GRAB_EXTEND,
+      RESET_P2_PERFORM_CZ_GRAB_CLOSE,
+      RESET_P2_WAIT_CZ_GRAB_CLOSE,
+      RESET_P2_PERFORM_CZ_GRAB_RETRACT, // Needs sensor check!
+      RESET_P2_WAIT_CZ_GRAB_RETRACT,    // Needs sensor check!
+      RESET_P2_CZ_GRAB_CONFIRMED,
+      RESET_P2_CZ_GRAB_FAILED,
+      RESET_P2_UPDATE_CZ_ARRAY_FREE,  // Mark the CZ slot as free now
+      RESET_P2_ROTATE_AWAY_CZ,        // Rotate gripper back to board angle
+      RESET_P2_WAIT_ROTATE_AWAY_CZ,
+      RESET_P2_MOVE_TO_HOME_SQUARE,   // Move Cart/Orb to the piece's home square
+      RESET_P2_WAIT_HOME_SQUARE_POS,
+      RESET_P2_ROTATE_FOR_HOME_RELEASE, // Rotate for board release (should be 0)
+      RESET_P2_WAIT_ROTATE_HOME_RELEASE,
+      RESET_P2_PERFORM_HOME_RELEASE_EXTEND, // "Release" sub-sequence onto board
+      RESET_P2_WAIT_HOME_RELEASE_EXTEND,
+      RESET_P2_PERFORM_HOME_RELEASE_OPEN,
+      RESET_P2_WAIT_HOME_RELEASE_OPEN,
+      RESET_P2_PERFORM_HOME_RELEASE_RETRACT,
+      RESET_P2_WAIT_HOME_RELEASE_RETRACT,
+      RESET_P2_PIECE_PLACED,          // Finished placing one K/Q from CZ
+
+    // === Phase 3: Place Misplaced Pieces from Board to Home ===
+    RESET_P3_START,
+    RESET_P3_ITERATE_BOARD,         // Iterate through board squares (0-63)
+    RESET_P3_CHECK_BOARD_PIECE,     // Check if piece on square needs to be moved home
+    RESET_P3_INITIATE_MOVE_TO_HOME, // Starts a standard move sequence (DO_...)
+    RESET_P3_WAIT_MOVE_TO_HOME,     // Waits for the DO_... sequence to complete
+    RESET_P3_PIECE_HOMED,           // Finished moving one piece home
+
+    // === Phase 4: Finish ===
+    RESET_P4_HOME_CAPTURE_MOTOR,
+    RESET_P4_WAIT_CAPTURE_MOTOR,
+    RESET_P4_LOGICAL_BOARD_RESET,
+    RESET_P4_UPDATE_NEXTION,
+    RESET_COMPLETE,
     // ... (Manual Move States, ERROR_STATE) ...
     MANUAL_MOVE_START,
     MANUAL_MOVING,
@@ -135,11 +216,10 @@ public:
 
     bool isBusy();
 
-    bool startMoveSequence(String fromLoc, String toLoc);
+    bool startMoveSequence(String fromLoc, String toLoc, bool isSubSequenceCall = false); // New
     bool startHomingSequence();
-    void initializeCaptureZone(); // Call after homing
-    // bool startManualMove(int actuatorId, bool direction);
-    // bool stopManualMove(int actuatorId);
+    void initializeCaptureZone();
+    bool startBoardResetSequence();
     MotionState getCurrentState() const; // <<<=== ADDED Getter Declaration
 
 private:
@@ -150,6 +230,8 @@ private:
     Servo servo2;
 
     MotionState currentState;
+    MotionState stateToReturnToAfterSubSequence; // <<< ADD THIS
+    bool subSequenceIsActive;                    // <<< ADD THIS
     unsigned long stateStartTime;
 
     String targetFromLoc;
@@ -174,6 +256,18 @@ private:
     bool homeCartHomed;
     bool homeOrbHomed;
 
+    // --- Reset State Tracking ---
+    int resetBoardIterator;
+    int resetCZIterator;
+    std::pair<int, int> reset_currentBoardCoords;
+    String reset_currentBoardAlg;
+    CapturedPieceInfo reset_pieceBeingMoved; // For P1 & P2 when dealing with piece info
+    int reset_targetCZSlotIndex;
+    long reset_targetCZSlotPos;
+    std::pair<int, int> reset_targetHomeSquareCoords;
+    String reset_targetHomeSquareAlg;
+    bool resetP3_subMoveInProgress; 
+
     // Helper function declarations (ensure they match definitions)
     bool getTargetsForSquare(String square, long &orbTarget, long &cartTarget);
     bool getTargetForCapture(int captureSlot, long &captureTarget);
@@ -190,6 +284,8 @@ private:
     void commandRotateGripper(int angle);
     String coordsToAlgebraic(int x, int y);
     int findFreeCaptureSlot(PieceColor color); // Helper to find an empty slot
+    std::pair<int, int> getUnambiguousHomeSquare(PieceType type, PieceColor color);
+    std::vector<std::pair<int, int>> getPotentialHomeSquares(PieceType type, PieceColor color);
     void executeStateMachine();
 
 
