@@ -10,14 +10,71 @@ extern websockets::WebsocketsClient client;
 // Make the global board object accessible
 extern Board board; // <<<=== DECLARE The Global Board Object
 
+// --- Constructor ---
 MotionController::MotionController() :
+    // Initialize Stepper objects with their type, step pin, and direction pin
     stepper1(AccelStepper::DRIVER, CAPTURE_STEP_PIN, CAPTURE_DIR_PIN),
     stepper2(AccelStepper::DRIVER, CART_STEP_PIN, CART_DIR_PIN),
     stepper3(AccelStepper::DRIVER, ORB_STEP_PIN, ORB_DIR_PIN),
+
+    // Initialize state variables
     currentState(MOTION_IDLE),
-    stateToReturnToAfterSubSequence(MOTION_IDLE), // Initialize
-    subSequenceIsActive(false)                   // Initialize
+    stateStartTime(0), // Will be set when states actually start
+
+    // Initialize target data (optional, but good practice)
+    targetFromLoc(""),
+    targetToLoc(""),
+    targetOrb1(0), targetCart1(0), targetCapt1(0),
+    targetOrb2(0), targetCart2(0), targetCapt2(0),
+    targetRot1(0), targetRot2(0),
+    locType1(LOC_INVALID), // Assuming LOC_INVALID is the first in your enum or a sensible default
+    locType2(LOC_INVALID),
+    isCaptureMove(false),
+    targetCaptureSlotIndex(-1),
+    targetCaptureSlotPos(0),
+    // pieceBeingCaptured will be default constructed
+
+    // Initialize homing flags
+    homeCaptureHomed(false),
+    homeCartHomed(false),
+    homeOrbHomed(false),
+
+    // Initialize Reset State Tracking variables
+    resetBoardIterator(0),
+    resetCZIterator(0),
+    // reset_currentBoardCoords will be set during iteration
+    reset_currentBoardAlg(""),
+    // reset_pieceBeingMoved will be default constructed
+    reset_targetCZSlotIndex(-1),
+    reset_targetCZSlotPos(0),
+    // reset_targetHomeSquareCoords will be set during iteration
+    reset_targetHomeSquareAlg(""),
+
+    // Initialize Retract Retry Counter
+    retractRetryCount(0),
+
+    // Initialize Sub-Sequence Tracking flags
+    stateToReturnToAfterSubSequence(MOTION_IDLE),
+    subSequenceIsActive(false),
+    lastMoveWasResetSubMoveFlag(false) // <<< For differentiating P3 sub-moves
 {
+    // Initialize pair members (if not done in initializer list, though above is better)
+    reset_currentBoardCoords = {-1, -1};
+    reset_targetHomeSquareCoords = {-1, -1};
+    resetSubMoveFromCoords = {-1, -1}; // <<< For P3 sub-moves
+    resetSubMoveToCoords = {-1, -1};   // <<< For P3 sub-moves
+
+    // Body of the constructor (can be empty if all initialization is done above)
+    Serial.println("MotionController object created.");
+}
+// Getter:
+bool MotionController::getResetSubMoveDetails(std::pair<int, int>& from, std::pair<int, int>& to) {
+    if (lastMoveWasResetSubMoveFlag) { // Check if the flag is still set from the last completed sub-move
+        from = resetSubMoveFromCoords;
+        to = resetSubMoveToCoords;
+        return true;
+    }
+    return false;
 }
 
 void MotionController::setup() {
@@ -398,6 +455,16 @@ bool MotionController::startMoveSequence(String fromLoc, String toLoc, bool isSu
         }
     }
 
+    if (isSubSequenceCall && currentState == RESET_P3_INITIATE_MOVE_TO_HOME) {
+        this->lastMoveWasResetSubMoveFlag = true;
+        // Store the actual board coordinates for this P3 sub-move
+        this->resetSubMoveFromCoords = reset_currentBoardCoords; // From P3's iteration
+        this->resetSubMoveToCoords = reset_targetHomeSquareCoords; // Target home from P3
+    } else {
+        this->lastMoveWasResetSubMoveFlag = false;
+        this->resetSubMoveFromCoords = {-1,-1}; // Clear them
+        this->resetSubMoveToCoords = {-1,-1};
+    }
     // If called as a sub-sequence, the calling state will set 'stateToReturnToAfterSubSequence' BEFORE this call.
     // We just mark that a sub-sequence is now active.
     if (isSubSequenceCall) {
@@ -862,6 +929,14 @@ void MotionController::executeStateMachine() {
              capture_zone[reset_targetCZSlotIndex] = reset_pieceBeingMoved; // Store the piece info
              // capture_zone[reset_targetCZSlotIndex].occupied = true; // Already set in reset_pieceBeingMoved
         }
+        if (reset_currentBoardCoords.first != -1) { // Check if valid coords were stored
+            Serial.print("  Logically clearing board at: ");
+            Serial.print(coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second));
+            delete board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second];
+            board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second] = nullptr;
+            reset_currentBoardCoords = {-1, -1}; // Clear after use
+            Serial.println(" - Done.");
+        }
         // Rotate gripper back before moving away
         commandRotateGripper(GRIPPER_ROT_BOARD);
         delay(450); // TODO: Non-blocking wait
@@ -1118,12 +1193,19 @@ void MotionController::executeStateMachine() {
             currentState = RESET_P2_PIECE_PLACED; stateStartTime = millis();
         } break;
 
-   case RESET_P2_PIECE_PLACED:
-       Serial.println("[MC Reset P2] PIECE_PLACED: K/Q moved from CZ to board.");
-       // Logical board update will happen at the VERY END in main.cpp after board.resetBoard()
-       resetCZIterator++; // Move to next CZ slot
-       currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
-       break;
+        case RESET_P2_PIECE_PLACED:
+        Serial.println("[MC Reset P2] PIECE_PLACED: K/Q moved from CZ to board.");
+        // Update logical board: Add the piece that was just placed
+        if (reset_targetHomeSquareCoords.first != -1 && reset_pieceBeingMoved.occupied) {
+            Serial.print("  Logically placing piece type "); Serial.print((int)reset_pieceBeingMoved.type);
+            Serial.print(" at "); Serial.println(coordsToAlgebraic(reset_targetHomeSquareCoords.first, reset_targetHomeSquareCoords.second));
+            board.addPiece(reset_pieceBeingMoved.type, reset_pieceBeingMoved.color, reset_targetHomeSquareCoords);
+            reset_pieceBeingMoved.occupied = false; // Clear for next use
+            reset_targetHomeSquareCoords = {-1,-1};
+        }
+        resetCZIterator++;
+        currentState = RESET_P2_ITERATE_CZ; stateStartTime = millis();
+        break;
 
 
      // === Phase 3: Place Misplaced Pieces from Board to Home ===
@@ -1778,21 +1860,23 @@ void MotionController::executeStateMachine() {
              }
              break;
 
-             case DO_COMPLETE: {
+             case DO_COMPLETE:
              Serial.print("[MC State] DO_COMPLETE. Sub-sequence was: "); Serial.println(subSequenceIsActive ? "ACTIVE" : "INACTIVE");
              Serial.print("  Returning to state: "); Serial.println(stateToReturnToAfterSubSequence);
- 
+         
               if (subSequenceIsActive) {
-                  currentState = stateToReturnToAfterSubSequence; // Go back to the calling sequence's next state
-                  subSequenceIsActive = false; // Clear the flag
-                  stateToReturnToAfterSubSequence = MOTION_IDLE; // Reset for next time
+                  currentState = stateToReturnToAfterSubSequence;
+                  subSequenceIsActive = false;
+                  stateToReturnToAfterSubSequence = MOTION_IDLE;
+                  // DO NOT clear lastMoveWasResetSubMoveFlag here. Main loop needs it.
               } else {
-                  currentState = MOTION_IDLE; // Standard completion to IDLE
+                  currentState = MOTION_IDLE;
+                  lastMoveWasResetSubMoveFlag = false; // Clear if it was a normal server move
+                  resetSubMoveFromCoords = {-1,-1};    // Clear these too
+                  resetSubMoveToCoords = {-1,-1};
               }
               stateStartTime = millis();
-              // Note: If returning to another state, that state's logic will execute in the *next* cycle.
-            }
-              break; // IMPORTANT: Break here
+              break;
 
          case ERROR_STATE:
              Serial.println("!!! Motion Controller in ERROR STATE !!!");

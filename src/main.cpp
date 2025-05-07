@@ -482,13 +482,23 @@ void loop() {
         send_orb_status_update();
 
         // --- Post-Sequence Updates ---
-        if ((lastMotionState == DO_COMPLETE /*|| lastMotionState == PROMOTION_COMPLETE - No special state needed */)
-             && lastCommandProcessed.isValid)
+        if (lastMotionState == DO_COMPLETE)
         {
+            std::pair<int, int> from, to;
+            if (motionController.getResetSubMoveDetails(from, to)) { // Check if it was a P3 reset sub-move
+                Serial.println("  DO_COMPLETE was part of RESET Phase 3 sequence.");
+                Serial.print("  Logically updating board for P3 move: ");
+                Serial.print(board.getSquareString(from)); Serial.print(" -> "); Serial.println(board.getSquareString(to));
+
+                move_nextion_piece(from, to); // Update display
+                board.movePiece(from, to);    // Update internal logic
+                board.printBoard();
+                // motionController.clearLastMoveWasResetFlag(); // Add this if you want to clear flag in MC
+            } else if (lastCommandProcessed.isValid) {
              Serial.println("Executing Post-Move/Promotion Updates...");
 
-             std::pair<int, int> from = lastCommandProcessed.fromCoords;
-             std::pair<int, int> to = lastCommandProcessed.toCoords;
+             from = lastCommandProcessed.fromCoords;
+             to = lastCommandProcessed.toCoords;
              String fromStr = board.getSquareString(from);
              String toStr = board.getSquareString(to);
 
@@ -537,9 +547,10 @@ void loop() {
 
 
              // Invalidate the stored command data now that it has been processed
-             lastCommandProcessed.isValid = false;
+             
              Serial.println("  Post-move updates complete.");
-
+            }
+            lastCommandProcessed.isValid = false;
         } else if (lastMotionState == HOMING_COMPLETE) {
             Serial.println("Homing sequence completed.");
              // --- Check if we need to trigger board reset ---

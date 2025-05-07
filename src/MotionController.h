@@ -221,6 +221,7 @@ public:
     void initializeCaptureZone();
     bool startBoardResetSequence();
     MotionState getCurrentState() const; // <<<=== ADDED Getter Declaration
+    bool getResetSubMoveDetails(std::pair<int, int>& from, std::pair<int, int>& to);
 
 private:
     AccelStepper stepper1;
@@ -267,7 +268,9 @@ private:
     std::pair<int, int> reset_targetHomeSquareCoords;
     String reset_targetHomeSquareAlg;
     bool resetP3_subMoveInProgress; 
-
+    bool lastMoveWasResetSubMoveFlag;
+    std::pair<int, int> resetSubMoveFromCoords; // Store FROM for P3 sub-move
+    std::pair<int, int> resetSubMoveToCoords;   // Store TO for P3 sub-move
     // Helper function declarations (ensure they match definitions)
     bool getTargetsForSquare(String square, long &orbTarget, long &cartTarget);
     bool getTargetForCapture(int captureSlot, long &captureTarget);
