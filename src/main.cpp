@@ -1,5 +1,3 @@
-// --- START OF FILE main.cpp ---
-
 #include <ArduinoWebsockets.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -9,8 +7,8 @@
 #include <config.h>
 #include <Preferences.h>
 
-#include "hardware_pins.h"     // Include hardware pins
-#include "MotionController.h" // Include our new motion controller
+#include "hardware_pins.h"     
+#include "MotionController.h" 
 
 Preferences prefs;
 
@@ -18,20 +16,20 @@ char     ssid[SSID_MAX_LEN];
 char     password[PWD_MAX_LEN];
 char     websockets_server_host[HOST_MAX_LEN];
 uint16_t websockets_server_port;
+
 bool hasIdentified = false;
+
 void readCredentials() {
     prefs.begin("orb_cfg", true); // read-only
-    // retrieve with default = empty
+
     String s = prefs.getString("ssid", "");
     String p = prefs.getString("pwd",  "");
     String h = prefs.getString("host", "");
   
-    // integers come back as `uint32_t`
     uint32_t port = prefs.getUInt("port", 0);
   
     prefs.end();
   
-    // copy into C-strings (or just hold as Strings if you like)
     s.toCharArray(ssid, SSID_MAX_LEN);
     p.toCharArray(password, PWD_MAX_LEN);
     h.toCharArray(websockets_server_host, HOST_MAX_LEN);
@@ -48,6 +46,7 @@ void readCredentials() {
   }
 
 void force_nextion_refresh();
+
 /////////////////////////////////// NEXTION //////////////
 EasyNex nextion(Serial2);
 bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
@@ -71,12 +70,13 @@ bool CONNECTED_TO_SERVER    = false;
 String ORB_CODE   = "";
 String GAME_ID    = "";
 String PLAYER_NAMES[2] = {"", ""};
-// unsigned short status = OCCUPIED; // Now managed implicitly by MotionController busy state
 Board board; // Logical board state
-MotionController motionController; // <<<=== Instantiate Motion Controller
+MotionController motionController; 
 ///////////////////////////////////////////////////////////////////
+
 std::pair<int, int> currentMoveFromCoords = {-1, -1};
 std::pair<int, int> currentMoveToCoords = {-1, -1};
+
 // --- Struct to Store Last Processed Command ---
 struct LastCommandInfo {
     bool isValid = false;
@@ -85,19 +85,16 @@ struct LastCommandInfo {
     bool wasCapture = false;
 
     // --- Fields for Special Moves ---
-    bool isSpecialMove = false; // General flag
-    SPECIAL_MOVES specialMoveType = SPECIAL_MOVES::NONE; // Store the type
-    PieceType promotionPieceType = PieceType::QUEEN; // Store the type to promote to (Default Queen)
+    bool isSpecialMove = false;
+    SPECIAL_MOVES specialMoveType = SPECIAL_MOVES::NONE; 
+    PieceType promotionPieceType = PieceType::QUEEN; 
 
-    // --- Fields for disabled special moves (keep commented out or remove) ---
-    // std::pair<int, int> special_rookFrom = {-1, -1};
-    // std::pair<int, int> special_rookTo = {-1, -1};
-    // std::pair<int, int> special_capturedPawnPos = {-1, -1};
 };
 
-LastCommandInfo lastCommandProcessed; // Global instance to store the info
-bool currentMoveIsCapture = false; // Flag if the current command involved a capture
-bool resetBoardAfterHoming = false; // Flag to trigger board reset after homing completes
+
+LastCommandInfo lastCommandProcessed;   // Global instance to store the info
+bool currentMoveIsCapture = false;      // Flag if the current command involved a capture
+bool resetBoardAfterHoming = false;     // Flag to trigger board reset after homing completes
 
 String generate_orb_code() {
     String code = "";
@@ -116,7 +113,6 @@ String generate_orb_code() {
 
 
 // --- Send Orb Status Update ---
-// Call this when motion starts or stops
 void send_orb_status_update() {
     if (!hasIdentified) return;
 
@@ -126,12 +122,12 @@ void send_orb_status_update() {
 
     orb_data["type"]    =  ORB_DATA;
     orb_data["orb_code"]= ORB_CODE;
-    orb_data["status"]  = current_status; // Use status derived from controller
+    orb_data["status"]  = current_status; 
 
     String json_data;
     serializeJson(orb_data, json_data);
 
-    if (client.available()) { // Check if client is valid before sending
+    if (client.available()) { 
        client.send(json_data);
        Serial.print("Sent Orb Status Update: "); Serial.println(current_status == IDLE ? "IDLE" : "OCCUPIED");
     } else {
@@ -142,13 +138,12 @@ void send_orb_status_update() {
 // --- Reset Orb Function ---
 void reset_orb() {
     GAME_ID = ""; PLAYER_NAMES[0] = ""; PLAYER_NAMES[1] = "";
-    // Don't reset logical board here yet
-    // board.resetBoard();
+
     ORB_CODE = generate_orb_code();
     force_nextion_refresh();
     Serial.println("Reset requested. Initiating Homing Sequence first...");
     if (motionController.startHomingSequence()) {
-        resetBoardAfterHoming = true; // Set flag to run board reset AFTER homing
+        resetBoardAfterHoming = true; 
         send_orb_status_update(); // Send OCCUPIED (due to homing)
     } else {
          Serial.println("Could not start homing (already busy?). Board reset skipped.");
@@ -352,13 +347,12 @@ void handle_data(WebsocketsMessage packet) {
                  if (specialMoveData.containsKey("type")) {
                      int specialTypeInt = specialMoveData["type"].as<int>();
                      // Map integer from JSON to SPECIAL_MOVES enum
-                     if (specialTypeInt == (int)SPECIAL_MOVES::PROMOTION) { // Check specifically for PROMOTION
+                     if (specialTypeInt == (int)SPECIAL_MOVES::PROMOTION) { // Check for PROMOTION
                          lastCommandProcessed.isSpecialMove = true;
                          lastCommandProcessed.specialMoveType = SPECIAL_MOVES::PROMOTION;
                          Serial.println("  *PROMOTION DETECTED*");
  
-                         // Get the piece type to promote to (assuming it's sent as string or enum value)
-                         // Example: Assuming server sends "QUEEN", "ROOK", etc.
+                         // Get the piece type to promote to 
                          if (specialMoveData.containsKey("promoted_to_type")) {
                              String promotedTypeStr = specialMoveData["promoted_to_type"].as<String>();
                              promotedTypeStr.toUpperCase();
@@ -373,7 +367,6 @@ void handle_data(WebsocketsMessage packet) {
                               Serial.println("  Promotion type not specified, defaulting to QUEEN.");
                          }
                      }
-                     // Add checks for other special moves here later if needed
                  }
              }
  
@@ -468,21 +461,21 @@ void loop() {
     timer = millis();
     nextion.NextionListen(); // Check for Nextion events
 
-    // Non-blocking update for the motion controller state machine
-    motionController.update(); // <<<=== Update Motion Controller
+    motionController.update(); //  Update Motion Controller
     
+    // -- Manual move (with controller) --
     if (motionController.getCurrentState() == MOTION_IDLE) {
         unsigned int step3_pos = motionController.stepper3.currentPosition();
         bool b1= (digitalRead(BUTTON_PIN_1));
         bool b2 = (digitalRead(BUTTON_PIN_2));
-        if ((b1 && !b2) && (step3_pos <6000)){
+        if ((b1 && !b2) && (step3_pos < ORB_MANUAL_MAX_POS)){
             motionController.stepper3.enableOutputs();
-            motionController.stepper3.setSpeed(500);
+            motionController.stepper3.setSpeed(MANUAL_ORB_SPEED);
             motionController.stepper3.runSpeed();
         }
-        else if ((!b1 && b2) && (step3_pos>10)){
+        else if ((!b1 && b2) && (step3_pos> ORB_MANUAL_MIN_POS)){
             motionController.stepper3.enableOutputs();
-            motionController.stepper3.setSpeed(-500);
+            motionController.stepper3.setSpeed(-MANUAL_ORB_SPEED);
             motionController.stepper3.runSpeed();
 
         }
@@ -491,6 +484,7 @@ void loop() {
             motionController.stepper3.disableOutputs();
         };
     };
+
     // --- State Transition Detection & Actions ---
     static MotionState lastMotionState = MOTION_IDLE;
     MotionState currentMotionState = motionController.getCurrentState();
@@ -512,7 +506,7 @@ void loop() {
                 move_nextion_piece(from, to); // Update display
                 board.movePiece(from, to);    // Update internal logic
                 board.printBoard();
-                // motionController.clearLastMoveWasResetFlag(); // Add this if you want to clear flag in MC
+
             } else if (lastCommandProcessed.isValid) {
              Serial.println("Executing Post-Move/Promotion Updates...");
 
@@ -523,9 +517,10 @@ void loop() {
 
              // --- Logical Board Update ---
              Serial.print("  Updating logical board for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
-             // Delete whatever is at the 'to' square (handles captures)
+        
              delete board.grid[to.first][to.second];
              board.grid[to.first][to.second] = nullptr;
+
              // Get the piece that moved (should be the pawn)
              Piece* movingPiece = board.grid[from.first][from.second];
              if (movingPiece == nullptr) {
@@ -537,7 +532,8 @@ void loop() {
                  // Check if it was a promotion
                  if (lastCommandProcessed.isSpecialMove && lastCommandProcessed.specialMoveType == SPECIAL_MOVES::PROMOTION) {
                      Serial.print("  Promotion! Deleting Pawn, Adding new piece type: ");
-                     Serial.println((int)lastCommandProcessed.promotionPieceType); // Print enum value for debug
+                     Serial.println((int)lastCommandProcessed.promotionPieceType); 
+
                      PieceColor color = movingPiece->getColor(); // Get color from the original pawn
                      delete movingPiece; // Delete the original Pawn object
 
@@ -555,40 +551,36 @@ void loop() {
 
              // --- Nextion Display Update ---
              Serial.print("  Updating Nextion display for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
-              // Clear the 'from' square visually
+         
              String nextionFromSquare = fromStr + ".picc";
-             nextion.writeNum(nextionFromSquare, 1); // Assuming 1 is empty square pic id
+             nextion.writeNum(nextionFromSquare, 1); 
 
-             // Set the 'to' square visually with the *final* piece's ID
-             String nextionToSquare = toStr + ".picc";
-             int finalPieceNextionId = board.getSquareNextionId(to); // Get ID of piece now at 'to'
-             nextion.writeNum(nextionToSquare, finalPieceNextionId);
-
-
-             // Invalidate the stored command data now that it has been processed
              
+             String nextionToSquare = toStr + ".picc";
+             int finalPieceNextionId = board.getSquareNextionId(to); 
+             nextion.writeNum(nextionToSquare, finalPieceNextionId);
              Serial.println("  Post-move updates complete.");
             }
+
             lastCommandProcessed.isValid = false;
         } else if (lastMotionState == HOMING_COMPLETE) {
             Serial.println("Homing sequence completed.");
-             // --- Check if we need to trigger board reset ---
-             if (resetBoardAfterHoming) {
-                 Serial.println("Triggering Board Reset Sequence now...");
-                 resetBoardAfterHoming = false; // Clear the flag
-                 if (motionController.startBoardResetSequence()) {
-                      send_orb_status_update(); // Send OCCUPIED (due to reset sequence)
-                 } else {
-                      Serial.println("Failed to start Board Reset sequence!");
-                 }
+            // --- Check if we need to trigger board reset ---
+            if (resetBoardAfterHoming) {
+
+                Serial.println("Triggering Board Reset Sequence now...");
+                resetBoardAfterHoming = false; // Clear the flag
+
+                if (motionController.startBoardResetSequence()) send_orb_status_update(); // Send OCCUPIED (due to reset sequence)
+                else Serial.println("Failed to start Board Reset sequence!");
              }
-             lastCommandProcessed.isValid = false; // Ensure invalid after homing
-        } else if (lastMotionState == RESET_COMPLETE) { // <<< Check if RESET finished
+            lastCommandProcessed.isValid = false; // Ensure invalid after homing
+        } else if (lastMotionState == RESET_COMPLETE) { //  Check if RESET finished
+            
             Serial.println("Board Reset Sequence Completed.");
             lastCommandProcessed.isValid = false; // Ensure invalid after reset
-            if (nextion.currentPageId == BOARD_SCREEN) { // Only force if on board screen
-                forceNextionFullRefresh = true; // Set flag for next load_nextion_page call
-            }
+
+            if (nextion.currentPageId == BOARD_SCREEN) forceNextionFullRefresh = true;
 
        } else if (lastCommandProcessed.isValid){
             Serial.println("Became IDLE unexpectedly. Invalidating last command data.");
@@ -598,8 +590,8 @@ void loop() {
     lastMotionState = currentMotionState; // Update tracker
 
 
-    // Handle WebSocket polling less frequently
-    if (timer - network_timer > 200) { // Check more often than 500ms?
+    // Handle WebSocket polling l
+    if (timer - network_timer > 200) {
         if(CONNECTED_TO_SERVER && client.available()) {
             client.poll();
         }
@@ -613,21 +605,20 @@ void loop() {
             CONNECTED_TO_SERVER = false;
             client.close();
             // Update Nextion status immediately
-            if(nextion.currentPageId == HOME_SCREEN) { // Only update if on home screen?
-                 nextion.writeStr("txt_connected.txt", "no server");
-                 nextion.writeNum("txt_connected.pco", 64512); // Orange/Yellow
+            if(nextion.currentPageId == HOME_SCREEN) { 
+                nextion.writeStr("txt_connected.txt", "no server");
+                nextion.writeNum("txt_connected.pco", 64512); // Orange/Yellow
             }
         }
     } 
 
 
-    // Refresh Nextion page contents if needed (call frequently but it has internal checks)
+    // Refresh Nextion page contents
     load_nextion_page();
 }
 
 
 // --- Nextion Trigger Functions ---
-// TODO: Implement these later using MotionController manual control methods
 
 void trigger0(){     String ns = nextion.readStr("txt_wifi_ssid.txt");
     String np = nextion.readStr("txt_wifi_pwd.txt");
@@ -644,6 +635,7 @@ void trigger0(){     String ns = nextion.readStr("txt_wifi_ssid.txt");
     delay(1000);
     ESP.restart();
 }
+
 void trigger1() {  Serial.println("Nextion Home Button Pressed.");
     if (!motionController.isBusy()) {
         motionController.startHomingSequence();
@@ -651,6 +643,7 @@ void trigger1() {  Serial.println("Nextion Home Button Pressed.");
         Serial.println("Cannot Home: Motion Controller is busy.");
     }
 }
+
 // === CART Stepper ===
 void trigger2() { // Cart + PRESS
     if (nextion.currentPageId == CONTROL_SCREEN) {

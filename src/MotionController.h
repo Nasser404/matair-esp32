@@ -1,16 +1,15 @@
-// --- START OF FILE MotionController.h ---
-
 #ifndef MOTION_CONTROLLER_H
 #define MOTION_CONTROLLER_H
 
 #include <AccelStepper.h>
 #include <ESP32Servo.h>
 #include <Arduino.h>
-#include "hardware_pins.h" // Include pin definitions
-#include "board.h"         // Needed for coordinate conversion potentially
-#include "enums.h"         // <<<=== INCLUDE ENUMS.H (contains ORB_STATUS::IDLE)
-#include "piece.h" // <<< Need Piece definition
-// --- Constants (Motion Specific) ---
+#include "hardware_pins.h"
+#include "board.h"         
+#include "enums.h"         
+#include "piece.h" 
+
+// --- Constants --- 
 const float STEPPER_SPEED = 4000;
 const float STEPPER_ACCEL = 5000;
 const float HOMING_SPEED_CAPTURE = 1000;
@@ -27,21 +26,28 @@ const int GripperOpen = 160;
 const int GripperClose = 50;
 
 const unsigned long ACTUATOR_TRAVEL_TIME_MS = 650;
-const float MANUAL_STEPPER_SPEED = 3000; // Speed for manual button control (adjust as needed)
 
-const long CAPTURE_HOME_BACKUP_STEPS = 200; // Adjust as needed
 
-const long ORB_MANUAL_MIN_POS = 0;
+const long CAPTURE_HOME_BACKUP_STEPS = 200; 
+
+const long ORB_MANUAL_MIN_POS = 10;
 const long ORB_MANUAL_MAX_POS = 6000;
-const unsigned int MANUAL_ORB_SPEED = 300;
-// --- Capture Zone Representation ---
+const unsigned int MANUAL_ORB_SPEED = 500;
+
+
+const float MANUAL_JOG_CART_SPEED = 1500;
+const float MANUAL_JOG_ORB_SPEED = 1000;
+const float MANUAL_JOG_CAPTURE_SPEED = 800;
+const int   MANUAL_JOG_SERVO_INCREMENT = 3; // Degrees per jog step for servos
+
+// --- Capture Zone  --- 
 struct CapturedPieceInfo {
     bool occupied = false;
-    PieceType type = PieceType::PAWN; // Default placeholder
-    PieceColor color = PieceColor::WHITE; // Default placeholder
+    PieceType type = PieceType::PAWN; 
+    PieceColor color = PieceColor::WHITE; 
 };
 
-// --- Location Types (Defined Globally Here) --- <<<=== DEFINE ENUM HERE
+// --- Location Types  --- 
 enum LocationType {
     LOC_INVALID,
     LOC_BOARD,
@@ -53,9 +59,9 @@ enum MotionState {
     MOTION_IDLE,
     HOMING_START,
     // ... (Homing states) ...
-    HOMING_CAPTURE_START_BACKUP_MOVE, // <<< NEW: Start backing up
-    HOMING_CAPTURE_WAIT_BACKUP,       // <<< NEW: Wait for backup to complete
-    HOMING_CAPTURE_START_HOME_MOVE,   // <<< RENAMED from HOMING_CAPTURE_START_MOVE
+    HOMING_CAPTURE_START_BACKUP_MOVE, 
+    HOMING_CAPTURE_WAIT_BACKUP,       
+    HOMING_CAPTURE_START_HOME_MOVE,   
     HOMING_CAPTURE_WAIT_HIT,
     HOMING_CART_ORB_START_MOVE,
     HOMING_CART_ORB_WAIT_HIT,
@@ -66,39 +72,39 @@ enum MotionState {
     DO_WAIT_STEPPERS_SOURCE,
     DO_ROTATE_GRIPPER_SOURCE,
     DO_WAIT_GRIPPER_SOURCE,
-    // Capture Handling (If destination is occupied)
-    DO_CAPTURE_START,               // State to handle capture before taking source piece
-    DO_CAPTURE_SAFETY_CHECKS_TARGET, // Safety before moving to target
-    DO_CAPTURE_MOVE_TO_TARGET,       // Move to target square to grab captured piece
+    // Capture Handling 
+    DO_CAPTURE_START,                       // State to handle capture before taking source piece
+    DO_CAPTURE_SAFETY_CHECKS_TARGET,        // Safety before moving to target
+    DO_CAPTURE_MOVE_TO_TARGET,               // Move to target square to grab captured piece
     DO_CAPTURE_WAIT_TARGET,
-    DO_CAPTURE_ROTATE_TARGET,       // Rotate gripper at target
-    DO_CAPTURE_WAIT_ROTATE_TARGET,
-    DO_CAPTURE_PERFORM_TAKE_EXTEND, // Grab the piece being captured
+    DO_CAPTURE_ROTATE_TARGET,               // Rotate gripper at target
+    DO_CAPTURE_WAIT_ROTATE_TARGET,      
+    DO_CAPTURE_PERFORM_TAKE_EXTEND,         // Grab the piece being captured
     DO_CAPTURE_WAIT_TAKE_EXTEND,
     DO_CAPTURE_PERFORM_TAKE_GRAB,
     DO_CAPTURE_WAIT_TAKE_GRAB,
     DO_CAPTURE_PERFORM_TAKE_RETRACT,
     DO_CAPTURE_WAIT_TAKE_RETRACT,
-    DO_CAPTURE_MOVE_TO_DROPOFF,     // Move Cart/Orb to above capture zone
+    DO_CAPTURE_MOVE_TO_DROPOFF,             // Move Cart/Orb to above capture zone
     DO_CAPTURE_WAIT_DROPOFF,
-    DO_CAPTURE_FIND_SLOT,           // Determine which capture slot to use
-    DO_CAPTURE_ROTATE_GRIPPER_CAPZONE, // Rotate gripper for capture zone dropoff
+    DO_CAPTURE_FIND_SLOT,                   // Determine which capture slot to use
+    DO_CAPTURE_ROTATE_GRIPPER_CAPZONE,      // Rotate gripper for capture zone dropoff
     DO_CAPTURE_WAIT_ROTATE_CAPZONE,
-    DO_CAPTURE_MOVE_CAPTURE_STEPPER, // Move capture stepper to the chosen slot
+    DO_CAPTURE_MOVE_CAPTURE_STEPPER,        // Move capture stepper to the chosen slot
     DO_CAPTURE_WAIT_CAPTURE_STEPPER,
-    DO_CAPTURE_PERFORM_RELEASE_EXTEND,// Release the captured piece
+    DO_CAPTURE_PERFORM_RELEASE_EXTEND,      // Release the captured piece
     DO_CAPTURE_WAIT_RELEASE_EXTEND,
     DO_CAPTURE_PERFORM_RELEASE_OPEN,
     DO_CAPTURE_WAIT_RELEASE_OPEN,
     DO_CAPTURE_PERFORM_RELEASE_RETRACT,
     DO_CAPTURE_WAIT_RELEASE_RETRACT,
     DO_CAPTURE_COMPLETE,            // Finished handling the captured piece
-    // Regular 'Take' Sequence (Modified for Retract Check)
+    // Take Sequence 
     DO_PERFORM_TAKE_EXTEND,
     DO_WAIT_TAKE_EXTEND,
     DO_PERFORM_TAKE_GRAB,
     DO_WAIT_TAKE_GRAB,
-    DO_PERFORM_TAKE_RETRACT_INITIAL,  // <<< Start initial timed retract
+    DO_PERFORM_TAKE_RETRACT_INITIAL,// <<< Start initial timed retract
     DO_WAIT_TAKE_RETRACT_INITIAL,   // <<< Wait for initial timed retract
     DO_CHECK_TAKE_RETRACT_SENSOR,   // <<< Check the sensor pin
     DO_RECOVER_TAKE_RETRACT_ROTATE, // <<< Recovery: Rotate slightly
@@ -119,7 +125,7 @@ enum MotionState {
     DO_WAIT_GRIPPER_DEST,
     DO_MOVE_STEPPERS_TO_DEST,
     DO_WAIT_STEPPERS_DEST,
-    // Regular 'Release' Sequence
+    //Release Sequence
     DO_PERFORM_RELEASE_EXTEND,
     DO_WAIT_RELEASE_EXTEND,
     DO_PERFORM_RELEASE_OPEN,
@@ -140,8 +146,8 @@ enum MotionState {
     RESET_P1_WAIT_GRAB_EXTEND_BOARD,
     RESET_P1_GRAB_CLOSE_BOARD,
     RESET_P1_WAIT_GRAB_CLOSE_BOARD,
-    RESET_P1_GRAB_RETRACT_BOARD,      // Needs sensor check!
-    RESET_P1_WAIT_GRAB_RETRACT_BOARD, // Needs sensor check!
+    RESET_P1_GRAB_RETRACT_BOARD,     
+    RESET_P1_WAIT_GRAB_RETRACT_BOARD, 
     RESET_P1_GRAB_CONFIRMED_BOARD,
     RESET_P1_GRAB_FAILED_BOARD,
     RESET_P1_ROTATE_AWAY_BOARD_TO_CZ,
@@ -163,19 +169,19 @@ enum MotionState {
     RESET_P1_PIECE_CLEARED_TO_CZ,       // Finished clearing one piece
 
     // === Phase 2: Place ALL Pieces from Capture Zone to Board Home ===
-    RESET_P2_START,                 // Entry point for Phase 2
+    RESET_P2_START,             
     RESET_P2_ITERATE_CZ,            // Iterate through capture_zone (0-31)
     RESET_P2_CHECK_CZ_PIECE,        // Check piece in CZ slot & find available home on board
     RESET_P2_MOVE_TO_CZ_SLOT,       // Move Cart/Capture to grab piece from slot
     RESET_P2_WAIT_CZ_SLOT_POS,
     RESET_P2_ROTATE_FOR_CZ_GRAB,
     RESET_P2_WAIT_ROTATE_CZ_GRAB,
-    RESET_P2_GRAB_EXTEND_FROM_CZ,   // Renamed for clarity
+    RESET_P2_GRAB_EXTEND_FROM_CZ,   
     RESET_P2_WAIT_GRAB_EXTEND_FROM_CZ,
     RESET_P2_GRAB_CLOSE_FROM_CZ,
     RESET_P2_WAIT_GRAB_CLOSE_FROM_CZ,
-    RESET_P2_GRAB_RETRACT_FROM_CZ,    // Needs sensor check!
-    RESET_P2_WAIT_GRAB_RETRACT_FROM_CZ,// Needs sensor check!
+    RESET_P2_GRAB_RETRACT_FROM_CZ,    
+    RESET_P2_WAIT_GRAB_RETRACT_FROM_CZ,
     RESET_P2_CZ_GRAB_CONFIRMED,
     RESET_P2_CZ_GRAB_FAILED,
     RESET_P2_UPDATE_CZ_ARRAY_AS_FREE, // Mark the CZ slot as free NOW
@@ -185,7 +191,7 @@ enum MotionState {
     RESET_P2_WAIT_HOME_SQUARE_POS,
     RESET_P2_ROTATE_FOR_HOME_RELEASE,
     RESET_P2_WAIT_ROTATE_HOME_RELEASE,
-    RESET_P2_RELEASE_EXTEND_ON_BOARD, // Renamed for clarity
+    RESET_P2_RELEASE_EXTEND_ON_BOARD,
     RESET_P2_WAIT_RELEASE_EXTEND_ON_BOARD,
     RESET_P2_RELEASE_OPEN_ON_BOARD,
     RESET_P2_WAIT_RELEASE_OPEN_ON_BOARD,
@@ -214,10 +220,7 @@ enum MotionState {
     MANUAL_MOVE_STOP,
     ERROR_STATE
 };
-const float MANUAL_JOG_CART_SPEED = 1500;
-const float MANUAL_JOG_ORB_SPEED = 1000;
-const float MANUAL_JOG_CAPTURE_SPEED = 800;
-const int   MANUAL_JOG_SERVO_INCREMENT = 3; // Degrees per jog step for servos
+
 enum class ManualActuator {
     CART,
     ORB,
@@ -249,8 +252,8 @@ public:
 
 
 private:
-ManualActuator currentJoggingActuator;
-bool jogDirectionPositive;
+    ManualActuator currentJoggingActuator;
+    bool jogDirectionPositive;
     AccelStepper stepper1;
     AccelStepper stepper2;
     
@@ -258,8 +261,8 @@ bool jogDirectionPositive;
     Servo servo2;
 
     MotionState currentState;
-    MotionState stateToReturnToAfterSubSequence; // <<< ADD THIS
-    bool subSequenceIsActive;                    // <<< ADD THIS
+    MotionState stateToReturnToAfterSubSequence; 
+    bool subSequenceIsActive;                  
     unsigned long stateStartTime;
 
     String targetFromLoc;
@@ -267,9 +270,10 @@ bool jogDirectionPositive;
     long targetOrb1, targetCart1, targetCapt1;
     long targetOrb2, targetCart2, targetCapt2;
     int targetRot1, targetRot2;
-    // These use the globally defined LocationType now
+
     LocationType locType1;
     LocationType locType2;
+
     // Capture-specific data
     bool isCaptureMove;           // Flag set during parsing if 'to' is occupied
     int targetCaptureSlotIndex;   // Index (0-31) of the chosen slot
@@ -298,11 +302,10 @@ bool jogDirectionPositive;
     bool lastMoveWasResetSubMoveFlag;
     std::pair<int, int> resetSubMoveFromCoords; // Store FROM for P3 sub-move
     std::pair<int, int> resetSubMoveToCoords;   // Store TO for P3 sub-move
-    // Helper function declarations (ensure they match definitions)
+
+    // Helper functions
     bool getTargetsForSquare(String square, long &orbTarget, long &cartTarget);
     bool getTargetForCapture(int captureSlot, long &captureTarget);
-    // No need to declare private member functions if definitions in .cpp are ordered correctly,
-    // but declaring them here doesn't hurt and can help readability.
     LocationType parseLocation(String locStr, long &orbTarget, long &cartTarget, long &captureTarget, int &gripperRotTarget);
     void enforceCartSafetyRotation(long targetCartPos);
     void enforceCaptureHomedForLowCart(long targetCartPos);
@@ -313,7 +316,7 @@ bool jogDirectionPositive;
     void commandGripperClose();
     void commandRotateGripper(int angle);
     String coordsToAlgebraic(int x, int y);
-    int findFreeCaptureSlot(PieceColor color); // Helper to find an empty slot
+    int findFreeCaptureSlot(PieceColor color);
     std::pair<int, int> getUnambiguousHomeSquare(PieceType type, PieceColor color);
     std::vector<std::pair<int, int>> getPotentialHomeSquares(PieceType type, PieceColor color);
     void executeStateMachine();

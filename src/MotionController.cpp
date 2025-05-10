@@ -1,14 +1,11 @@
-// --- START OF FILE MotionController.cpp ---
-
 #include "MotionController.h"
-#include "hardware_pins.h" // Ensure pins are included
-
-#include <ArduinoWebsockets.h> // <<< Include WebSocket library header
+#include "hardware_pins.h" 
+#include <ArduinoWebsockets.h>
 
 // Make the global client object from main.cpp accessible
 extern websockets::WebsocketsClient client; 
 // Make the global board object accessible
-extern Board board; // <<<=== DECLARE The Global Board Object
+extern Board board;
 
 // --- Constructor ---
 MotionController::MotionController() :
@@ -19,20 +16,20 @@ MotionController::MotionController() :
 
     // Initialize state variables
     currentState(MOTION_IDLE),
-    stateStartTime(0), // Will be set when states actually start
+    stateStartTime(0),
 
-    // Initialize target data (optional, but good practice)
+    // Initialize target data
     targetFromLoc(""),
     targetToLoc(""),
     targetOrb1(0), targetCart1(0), targetCapt1(0),
     targetOrb2(0), targetCart2(0), targetCapt2(0),
     targetRot1(0), targetRot2(0),
-    locType1(LOC_INVALID), // Assuming LOC_INVALID is the first in your enum or a sensible default
+    locType1(LOC_INVALID), 
     locType2(LOC_INVALID),
     isCaptureMove(false),
     targetCaptureSlotIndex(-1),
     targetCaptureSlotPos(0),
-    // pieceBeingCaptured will be default constructed
+    
 
     // Initialize homing flags
     homeCaptureHomed(false),
@@ -56,18 +53,15 @@ MotionController::MotionController() :
     // Initialize Sub-Sequence Tracking flags
     stateToReturnToAfterSubSequence(MOTION_IDLE),
     subSequenceIsActive(false),
-    lastMoveWasResetSubMoveFlag(false) // <<< For differentiating P3 sub-moves
+    lastMoveWasResetSubMoveFlag(false) 
 {
-    // Initialize pair members (if not done in initializer list, though above is better)
+    // Initialize pair members 
     reset_currentBoardCoords = {-1, -1};
     reset_targetHomeSquareCoords = {-1, -1};
-    resetSubMoveFromCoords = {-1, -1}; // <<< For P3 sub-moves
-    resetSubMoveToCoords = {-1, -1};   // <<< For P3 sub-moves
-
-    // Body of the constructor (can be empty if all initialization is done above)
+    resetSubMoveFromCoords = {-1, -1}; 
+    resetSubMoveToCoords = {-1, -1};   
     Serial.println("MotionController object created.");
 }
-// Getter:
 bool MotionController::getResetSubMoveDetails(std::pair<int, int>& from, std::pair<int, int>& to) {
     if (lastMoveWasResetSubMoveFlag) { // Check if the flag is still set from the last completed sub-move
         from = resetSubMoveFromCoords;
@@ -106,23 +100,20 @@ void MotionController::setup() {
     pinMode(BUTTON_PIN_1, INPUT);
     pinMode(BUTTON_PIN_2, INPUT);
 
-    currentState = MOTION_IDLE; // <<<=== Use Renamed State
+    currentState = MOTION_IDLE; 
     Serial.println("MotionController::setup() complete. Waiting for Homing/Commands.");
-    initializeCaptureZone(); // Initialize capture zone (can be done before homing)
+    initializeCaptureZone(); // Initialize capture zone 
     startHomingSequence();
 }
 
 // ==========================================================================
-// === PRIVATE HELPER FUNCTIONS (Define Before Use) =========================
+// ===              HELPER FUNCTIONS =========================
 // ==========================================================================
 bool MotionController::startManualJog(ManualActuator actuator, bool positiveDirection) {
     if (currentState != MOTION_IDLE) {
         Serial.println("MC_Jog: Cannot start jog, controller busy.");
         return false;
     }
-
-    // Stop any other jog first (simplifies logic, only one at a time)
-    // stopAllManualJogs(); // Or just let the new one override
 
     currentJoggingActuator = actuator; // Store which one we are jogging
     jogDirectionPositive = positiveDirection;
@@ -158,46 +149,38 @@ bool MotionController::startManualJog(ManualActuator actuator, bool positiveDire
             break;
         case ManualActuator::GRIPPER_ROTATION: {// Servo1
             Serial.print("GRIPPER_ROT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
-            // For servos, we'll increment/decrement position in update() if a flag is set
-            // Or, if Nextion sends continuous press, we handle here. Assuming press-to-move.
-            // This startManualJog is more for "start continuous move until stop is called".
-            // If Nextion buttons are "momentary increment", the logic is different.
-            // For now, let's assume servos will be "jogged" by repeated calls to a "step" function
-            // or by setting a target angle. This function isn't ideal for servo "hold-to-move".
-            // We'll adjust if Nextion sends continuous press.
-            // Let's assume for now Nextion sends a "step command" trigger.
             int currentAngle1 = servo1.read();
             int newAngle1 = currentAngle1 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
             servo1.write(constrain(newAngle1, 0, 180));
-            return true; // Servo move is discrete, no "stop" needed from this func
+            return true; 
         }
             break;
         case ManualActuator::GRIPPER_OPEN_CLOSE: {// Servo2
             Serial.print("GRIPPER_OC, Dir: "); Serial.println(positiveDirection ? "+" : "-");
             int currentAngle2 = servo2.read();
-            // Positive = Open (larger angle), Negative = Close (smaller angle)
+
             int newAngle2 = currentAngle2 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
-            servo2.write(constrain(newAngle2, GripperClose - 10, GripperOpen + 10)); // Allow slight over/under
-            return true; // Servo move is discrete
+            servo2.write(constrain(newAngle2, GripperClose - 10, GripperOpen + 10)); 
+            return true; 
         }
             break;
         case ManualActuator::LINEAR_ACTUATOR:
             Serial.print("LIN_ACT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
-            if (positiveDirection) commandExtendActuator(); // Positive = Extend
-            else commandRetractActuator(); // Negative = Retract
+            if (positiveDirection) commandExtendActuator(); 
+            else commandRetractActuator();
             break;
     }
     return true;
 }
 
 bool MotionController::stopManualJog(ManualActuator actuator) {
-    // This function is called when a specific jog button is RELEASED
+
     Serial.print("MC_Jog: Stopping jog for ");
     switch (actuator) {
         case ManualActuator::CART:
             Serial.println("CART");
             stepper2.setSpeed(0);
-            // stepper2.disableOutputs(); // Optional: disable after a delay
+           
             break;
         case ManualActuator::ORB:
             Serial.println("ORB");
@@ -209,16 +192,15 @@ bool MotionController::stopManualJog(ManualActuator actuator) {
             break;
         case ManualActuator::GRIPPER_ROTATION:
              Serial.println("GRIPPER_ROT (no continuous stop needed)");
-            break; // No continuous move for servos in current startManualJog
+            break; 
         case ManualActuator::GRIPPER_OPEN_CLOSE:
              Serial.println("GRIPPER_OC (no continuous stop needed)");
-            break; // No continuous move
+            break; 
         case ManualActuator::LINEAR_ACTUATOR:
             Serial.println("LIN_ACT");
             commandStopActuator();
             break;
     }
-    // currentJoggingActuator could be cleared here if we ensure only one at a time
     return true;
 }
 
@@ -228,9 +210,6 @@ bool MotionController::stopAllManualJogs() {
     stepper2.setSpeed(0);
     stepper3.setSpeed(0);
     commandStopActuator();
-    // Servos are not continuously moved by this system, so no stop needed.
-    // Optionally disable outputs:
-    // stepper1.disableOutputs(); stepper2.disableOutputs(); stepper3.disableOutputs();
     return true;
 }
 
@@ -284,7 +263,7 @@ std::vector<std::pair<int, int>> MotionController::getPotentialHomeSquares(Piece
     return homes;
 } 
 
-// --- Helper: Get Home Square --- <<<=== CORRECT DEFINITION SCOPE
+// --- Helper: Get Home Square --- 
 std::pair<int, int> MotionController::getUnambiguousHomeSquare(PieceType type, PieceColor color) {
     if (type == PieceType::KING) {
         return (color == PieceColor::WHITE) ? std::make_pair(4, 7) : std::make_pair(4, 0);
@@ -1996,6 +1975,6 @@ case RESET_P2_PIECE_PLACED_ON_BOARD:
             break; 
     }
 }
-MotionState MotionController::getCurrentState() const { // <<<=== ADDED Getter Definition
+MotionState MotionController::getCurrentState() const {
     return currentState;
 }

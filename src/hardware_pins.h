@@ -1,5 +1,3 @@
-// --- Add to main.cpp (or a new hardware_pins.h) ---
-
 #ifndef HARDWARE_PINS_H
 #define HARDWARE_PINS_H
 
@@ -20,8 +18,8 @@ const int ORB_DIR_PIN  = 0; // XX;
 const int ENDSTOP_ORB_PIN = 26; // XX;
 
 // === Servo Pins ===
-const int ROTATION_SERVO_PIN = 14; // XX; // Servo1 in previous code
-const int GRIPPER_SERVO_PIN = 12; // XX;  // Servo2 in previous code
+const int ROTATION_SERVO_PIN = 14; // XX; // Servo1 
+const int GRIPPER_SERVO_PIN = 12; // XX;  // Servo2
 
 // === Linear Actuator Pins ===
 const int ACTUATOR_IN1_PIN = 32; // XX; // Motor Pin 1
@@ -32,6 +30,6 @@ const int BUTTON_PIN_1 = 34; // XX;
 const int BUTTON_PIN_2 = 35; // XX;
 
 // === Nextion Serial ===
-// Defined by EasyNex library (Serial2: RX=16, TX=17)
+// (Serial2: RX=16, TX=17)
 
 #endif // HARDWARE_PINS_H

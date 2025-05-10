@@ -1,5 +1,4 @@
-// --- START OF FILE piece.h ---
-#pragma once // <<<=== ADD THIS INCLUDE GUARD
+#pragma once 
 
 #include <Arduino.h>
 #include <iostream>
@@ -14,8 +13,8 @@ class Piece {
     protected:
         String name;
         std::pair<int, int> pos;
-        PieceType type;   // Protected member variable
-        PieceColor color; // Protected member variable
+        PieceType type;   
+        PieceColor color; 
     
     public:
         Piece(String name, std::pair<int, int> pos, PieceType type, PieceColor color)
@@ -27,9 +26,9 @@ class Piece {
         std::pair<int, int> getPosition() const { return pos; }
         void setPosition(std::pair<int, int> newPos) { pos = newPos; }
     
-        // --- ADDED GETTER METHODS ---
-        PieceType getType() const { return type; }      // <<<=== ADD THIS
-        PieceColor getColor() const { return color; }    // <<<=== ADD THIS
+        // --- GETTER METHODS ---
+        PieceType getType() const { return type; }     
+        PieceColor getColor() const { return color; }   
         // ----------------------------
     
         int getNextionId() const {
@@ -40,10 +39,11 @@ class Piece {
                 case PieceType::ROOK: return (color == PieceColor::WHITE) ? 8 : 14;
                 case PieceType::QUEEN: return (color == PieceColor::WHITE) ? 9 : 15;
                 case PieceType::KING: return (color == PieceColor::WHITE) ? 10 : 16;
-                default: return -1; // Should maybe return a default 'empty' ID?
+                default: return -1;
             }
         };
     };
+    
 class Pawn : public Piece {
 public:
     Pawn(std::pair<int, int> pos, PieceColor color)

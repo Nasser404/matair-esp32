@@ -1,13 +1,12 @@
-// --- START OF FILE board.h ---
-#pragma once // <<<=== ADD THIS INCLUDE GUARD
+#pragma once 
 
 #include <Arduino.h>
-#include <piece.h> // piece.h should already have #pragma once
+#include <piece.h> 
 
 class Board {
 
     public:
-        Piece* grid[8][8];  // Using raw pointers instead of vectors to save ESP32 memory
+        Piece* grid[8][8];
         Board();
         ~Board();
 
