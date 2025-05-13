@@ -18,7 +18,7 @@ The core functionality involves:
 ## Hardware Components
 
 1.  **MCU:** ESP32 (programmed using PlatformIO, `esp32dev` board profile).
-2.  **Stepper Motors (3) with Drivers (e.g., A4988/DRV8825):**
+2.  **Stepper Motors (3) with Drivers**
     *   **Cart Stepper:** Moves the robot assembly along a rail.
         *   Limit Switch: For homing.
     *   **Orb Stepper:** Rotates the spherical chessboard.
@@ -26,19 +26,19 @@ The core functionality involves:
     *   **Capture Stepper:** Rotates a 32-tooth gear serving as the capture zone.
         *   Limit Switch: For homing.
 3.  **Servo Motors (2):**
-    *   **Rotation Servo (Servo1):** Rotates the entire gripper assembly (0-180 degrees).
+    *   **Rotation Servo (Servo1):** Rotates the entire gripper assembly.
     *   **Gripper Servo (Servo2):** Opens and closes the gripper fingers.
 4.  **Linear Actuator (1):**
-    *   Extends/retracts the gripper vertically (approx. 50mm travel).
-    *   Controlled by an L293N motor driver (or similar H-Bridge).
+    *   Extends/retracts the gripper (approx. 50mm travel).
+    *   Controlled by an L293N motor driver.
     *   Features internal mechanical limit switches. An additional sensor circuit (using a relay connected to one of the actuator's DC motor pins) provides feedback to the ESP32 (on GPIO 13) to confirm full retraction.
-5.  **Limit Switches (3):** One for each stepper motor for homing. Configured as Active LOW with INPUT_PULLUP.
+5.  **Limit Switches (3):** One for each stepper motor for homing.
 6.  **Push Buttons (2):** Used for manual Orb Stepper rotation when the system is idle.
 7.  **Display:** Nextion Touchscreen Display.
     *   Connected via Serial2 (ESP32: GPIO 16 (RX2), GPIO 17 (TX2)).
     *   Controlled using the `EasyNextionLibrary`.
 8.  **Connectivity:** Onboard ESP32 WiFi module.
-9.  **Power Supply:** Appropriate power supply for ESP32, motors, and drivers.
+9.  **Power Supply:** 12V 60W.
 
 ## Pin Assignments
 
@@ -85,8 +85,7 @@ Refer to `src/hardware_pins.h` for detailed pin assignments. Key assignments inc
         *   Pawn Promotion (simplified: moves pawn, logical/visual update).
         *   Full Physical Board Reset sequence.
     *   Includes safety checks (e.g., gripper rotation for low cart positions, capture motor homing for very low cart positions).
-    *   Handles actuator retract confirmation using the sensor.
-    *   Provides methods to start sequences (e.g., `startMoveSequence`, `startHomingSequence`, `startBoardResetSequence`).
+    *   Handles actuator retract confirmation using the sensor
 *   **`board.h` / `board.cpp`:**
     *   Represents the logical state of the chessboard (8x8 grid of `Piece` pointers).
     *   Methods for initializing the board, adding pieces, moving pieces logically, and printing the board state.
