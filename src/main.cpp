@@ -723,7 +723,6 @@ void trigger13() { // Capture - RELEASE
 }
 
 // === GRIPPER ROTATION (Servo1) ===
-// For servos, "PRESS" will make one step. "RELEASE" does nothing here.
 void trigger14() { // Gripper Rot + PRESS
     if (nextion.currentPageId == CONTROL_SCREEN) {
         Serial.println("Nextion: Gripper Rot + PRESS (Step)");
@@ -732,7 +731,6 @@ void trigger14() { // Gripper Rot + PRESS
 }
 void trigger15() { // Gripper Rot + RELEASE - Does nothing for stepped servo control
     if (nextion.currentPageId == CONTROL_SCREEN) {
-        // Serial.println("Nextion: Gripper Rot + RELEASE (No action)");
     }
 }
 void trigger16() { // Gripper Rot - PRESS
@@ -742,8 +740,7 @@ void trigger16() { // Gripper Rot - PRESS
     }
 }
 void trigger17() { // Gripper Rot - RELEASE - Does nothing
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-        // Serial.println("Nextion: Gripper Rot - RELEASE (No action)");
+    if (nextion.currentPageId == CONTROL_SCREEN) {;
     }
 }
 
@@ -774,27 +771,23 @@ void trigger21() { // Linear Actuator - RELEASE (Stop Retract)
 }
 
 // === GRIPPER OPEN/CLOSE (Servo2) ===
-// For servos, "PRESS" will make one step. "RELEASE" does nothing here.
-// Positive direction = Open further, Negative direction = Close further
 void trigger22() { // Gripper Open + PRESS
     if (nextion.currentPageId == CONTROL_SCREEN) {
         Serial.println("Nextion: Gripper Open + PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, true); // True = Open more
+        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, true); 
     }
 }
 void trigger23() { // Gripper Open + RELEASE - Does nothing
     if (nextion.currentPageId == CONTROL_SCREEN) {
-        // Serial.println("Nextion: Gripper Open + RELEASE (No action)");
     }
 }
 void trigger24() { // Gripper Close - PRESS
     if (nextion.currentPageId == CONTROL_SCREEN) {
         Serial.println("Nextion: Gripper Close - PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, false); // False = Close more
+        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, false);
     }
 }
-void trigger25() { // Gripper Close - RELEASE - Does nothing
+void trigger25() { // Gripper Close - RELEASE
     if (nextion.currentPageId == CONTROL_SCREEN) {
-        // Serial.println("Nextion: Gripper Close - RELEASE (No action)");
     }
 }

@@ -30,11 +30,12 @@ const unsigned long ACTUATOR_TRAVEL_TIME_MS = 650;
 
 const long CAPTURE_HOME_BACKUP_STEPS = 200; 
 
+// WITH BUTTON
 const long ORB_MANUAL_MIN_POS = 10;
 const long ORB_MANUAL_MAX_POS = 6000;
 const unsigned int MANUAL_ORB_SPEED = 500;
 
-
+// WITH NEXTION
 const float MANUAL_JOG_CART_SPEED = 1500;
 const float MANUAL_JOG_ORB_SPEED = 1000;
 const float MANUAL_JOG_CAPTURE_SPEED = 800;
