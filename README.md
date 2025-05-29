@@ -1,4 +1,4 @@
-# Spherical Chess Robot - ESP32 Firmware
+# Mat@ir - ESP32 Firmware
 
 [![Language](https://img.shields.io/badge/language-C%2B%2B-blue.svg)](https://isocpp.org/)
 [![Framework](https://img.shields.io/badge/framework-Arduino-00979D.svg)](https://www.arduino.cc/)
