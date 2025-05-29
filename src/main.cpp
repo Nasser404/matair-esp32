@@ -340,11 +340,11 @@ void handle_data(WebsocketsMessage packet) {
              lastCommandProcessed.wasCapture = (board.grid[xto][yto] != nullptr);
              lastCommandProcessed.isSpecialMove = false; // Default
              lastCommandProcessed.specialMoveType = SPECIAL_MOVES::NONE; // Default
- 
+              
              // --- Check for Special Move Details ---
-             if (data.containsKey("special_move") && data["special_move"].is<JsonObject>()) {
+             if (data["special_move"].is<JsonVariant>() && data["special_move"].is<JsonObject>()) {
                  JsonObject specialMoveData = data["special_move"];
-                 if (specialMoveData.containsKey("type")) {
+                 if (specialMoveData["type"].is<JsonVariant>()) {
                      int specialTypeInt = specialMoveData["type"].as<int>();
                      // Map integer from JSON to SPECIAL_MOVES enum
                      if (specialTypeInt == (int)SPECIAL_MOVES::PROMOTION) { // Check for PROMOTION
@@ -353,7 +353,7 @@ void handle_data(WebsocketsMessage packet) {
                          Serial.println("  *PROMOTION DETECTED*");
  
                          // Get the piece type to promote to 
-                         if (specialMoveData.containsKey("promoted_to_type")) {
+                         if (specialMoveData["promoted_to_type"].is<JsonVariant>()) {
                              String promotedTypeStr = specialMoveData["promoted_to_type"].as<String>();
                              promotedTypeStr.toUpperCase();
                              if (promotedTypeStr == "QUEEN") lastCommandProcessed.promotionPieceType = PieceType::QUEEN;
@@ -435,7 +435,7 @@ void setup() {
     readCredentials();
     Serial.printf("Loaded SSID: %s, PWD: %s, Server: %s:%u\n", ssid, password, websockets_server_host, websockets_server_port);
 
-    motionController.setup(); // <<<=== Setup Motion Controller Hardware
+    motionController.setup(); //  Setup Motion Controller 
 
     ORB_CODE = generate_orb_code();
     Serial.print("Generated ORB Code: "); Serial.println(ORB_CODE);
@@ -453,7 +453,6 @@ void setup() {
             timeout_timer = millis();
         }
     }
-
     force_nextion_refresh();
 }
 
