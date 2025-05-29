@@ -1,24 +1,55 @@
 # Spherical Chess Robot - ESP32 Firmware
 
-C++ firmware for an ESP32-based Spherical Chess Robot.
-The robot is designed to physically execute chess moves on a spherical board, receiving game instructions from an online game server via WebSockets.
+[![Language](https://img.shields.io/badge/language-C%2B%2B-blue.svg)](https://isocpp.org/)
+[![Framework](https://img.shields.io/badge/framework-Arduino-00979D.svg)](https://www.arduino.cc/)
+[![MCU](https://img.shields.io/badge/MCU-ESP32-E7352C.svg)](https://www.espressif.com/en/products/socs/esp32)
+
+C++ firmware for an ESP32-based Spherical Chess Robot. This robot is designed to physically execute chess moves on a spherical board, receiving game instructions from an online game server via WebSockets.
+
+## Table of Contents
+
+- [Project Overview](#project-overview)
+- [Features](#features)
+- [Hardware Requirements](#hardware-requirements)
+- [Pin Assignments](#pin-assignments)
+- [Software & Libraries](#software--libraries)
+- [Firmware Architecture](#firmware-architecture)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Hardware Assembly](#hardware-assembly)
+  - [Software Setup](#software-setup)
+- [Configuration](#configuration)
+  - [WiFi & Server Credentials](#wifi--server-credentials)
+  - [Nextion HMI](#nextion-hmi)
+- [Building & Uploading](#building--uploading)
+- [Operation](#operation)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Project Overview
-The core functionality involves:
-*   Connecting to a WebSocket server to receive game commands.
-*   Interpreting chess moves
-*   Controlling three stepper motors for precise movement of the cart (rail), orb (board rotation), and capture zone rotation.
-*   Operating two servo motors for gripper rotation and gripping action.
-*   Driving a linear actuator for vertical gripper movement.
-*   Homing all steppers using limit switches for accurate positioning.
-*   Managing a physical capture zone for storing captured pieces.
-*   Providing a user interface via a Nextion touchscreen display.
-*   Implementing safety checks to prevent mechanical damage.
-*   Offering manual control options for testing and calibration.
 
-## Hardware Components
+The Spherical Chess Robot translates digital chess moves from a remote server into physical actions on a custom-built spherical chessboard. It utilizes an ESP32 microcontroller to manage WebSocket communication, interpret game logic, and precisely control various motors and sensors to manipulate chess pieces.
 
-1.  **MCU:** ESP32 (programmed using PlatformIO, `esp32dev` board profile).
-2.  **Stepper Motors (3) with Drivers**
+## Features
+
+*   **WebSocket Connectivity:** Connects to a remote game server to receive chess move commands.
+*   **Chess Move Interpretation:** Parse game commands.
+*   **Precise Motor Control:**
+    *   Three stepper motors (cart, orb, capture zone) for accurate positioning.
+    *   Two servo motors for gripper rotation and piece manipulation.
+    *   One linear actuator for horizontal gripper movement.
+*   **Automated Homing:** Employs limit switches for reliable homing of all stepper motors.
+*   **Physical Capture Zone:** Manages a dedicated area for storing captured pieces.
+*   **User Interface:** Nextion touchscreen display for status updates, configuration, and manual controls.
+*   **Safety Mechanisms:** Implements checks to prevent mechanical collisions and damage.
+*   **Manual Control:** Offers options via push buttons and Nextion display for testing and calibration.
+*   **Persistent Configuration:** Stores WiFi and server settings in ESP32 flash memory.
+
+## Hardware Requirements
+
+1.  **Microcontroller:** ESP32 (`esp32dev` board profile).
+2.  **Stepper Motors (3) with Drivers:**
     *   **Cart Stepper:** Moves the robot assembly along a rail.
         *   Limit Switch: For homing.
     *   **Orb Stepper:** Rotates the spherical chessboard.
@@ -30,98 +61,157 @@ The core functionality involves:
     *   **Gripper Servo (Servo2):** Opens and closes the gripper fingers.
 4.  **Linear Actuator (1):**
     *   Extends/retracts the gripper (approx. 50mm travel).
-    *   Controlled by an L293N motor driver.
-    *   Features internal mechanical limit switches. An additional sensor circuit (using a relay connected to one of the actuator's DC motor pins) provides feedback to the ESP32 (on GPIO 13) to confirm full retraction.
-5.  **Limit Switches (3):** One for each stepper motor for homing.
-6.  **Push Buttons (2):** Used for manual Orb Stepper rotation when the system is idle.
+    *   Controlled by an L293N motor driver (or similar).
+    *   Features internal mechanical limit switches.
+    *   Additional retraction sensor circuit (relay-based) connected to ESP32 GPIO 13.
+5.  **Limit Switches (3):** One dedicated to each stepper motor for homing routines.
+6.  **Push Buttons (2):** For manual Orb Stepper rotation when the system is idle.
 7.  **Display:** Nextion Touchscreen Display.
     *   Connected via Serial2 (ESP32: GPIO 16 (RX2), GPIO 17 (TX2)).
-    *   Controlled using the `EasyNextionLibrary`.
 8.  **Connectivity:** Onboard ESP32 WiFi module.
-9.  **Power Supply:** 12V 60W.
+9.  **Power Supply:** 12V, 60W (or as required by your components).
+
+*(A detailed Fritzing diagram or connection schematic would be a valuable addition here or in a separate `docs/` folder.)*
 
 ## Pin Assignments
 
-Refer to `src/hardware_pins.h` for detailed pin assignments. Key assignments include:
+All GPIO pin assignments are centrally defined in `src/hardware_pins.h`. Refer to this file for the most up-to-date and detailed pinout.
 
-*   **Cart Stepper:** Step, Direction, Endstop
-*   **Orb Stepper:** Step, Direction, Endstop
-*   **Capture Stepper:** Step, Direction, Endstop
-*   **Rotation Servo (Servo1):** Control Pin
-*   **Gripper Servo (Servo2):** Control Pin
-*   **Linear Actuator (L293N):** IN1, IN2
-*   **Linear Actuator Retracted Sensor:** GPIO 13 (Active HIGH signal assumed)
-*   **Manual Button 1 (Orb +):** GPIO 34
-*   **Manual Button 2 (Orb -):** GPIO 35
-*   **Nextion Serial2:** ESP32 Default Serial2 pins (GPIO16_RX, GPIO17_TX)
+Key assignments include:
+*   **Cart Stepper:** `CART_STEP_PIN`, `CART_DIR_PIN`, `CART_ENDSTOP_PIN`
+*   **Orb Stepper:** `ORB_STEP_PIN`, `ORB_DIR_PIN`, `ORB_ENDSTOP_PIN`
+*   **Capture Stepper:** `CAPTURE_STEP_PIN`, `CAPTURE_DIR_PIN`, `CAPTURE_ENDSTOP_PIN`
+*   **Rotation Servo (Servo1):** `ROTATION_SERVO_PIN`
+*   **Gripper Servo (Servo2):** `GRIPPER_SERVO_PIN`
+*   **Linear Actuator (L293N):** `ACTUATOR_IN1_PIN`, `ACTUATOR_IN2_PIN`
+*   **Linear Actuator Retracted Sensor:** `ACTUATOR_RETRACTED_SENSOR_PIN` 
+*   **Manual Orb Button +:** `BUTTON_PIN_1` 
+*   **Manual Orb Button -:** `BUTTON_PIN_2` 
+*   **Nextion Serial2:** ESP32 Default Serial2 pins (TX2: GPIO17, RX2: GPIO16)
 
 ## Software & Libraries
 
-*   **PlatformIO IDE:** For project management and building.
-*   **Arduino Framework:** For ESP32 programming.
-*   **`AccelStepper`:** For stepper motor control (acceleration and non-blocking movement).
-*   **`ESP32Servo`:** For servo motor control.
-*   **`ArduinoWebsockets`:** For WebSocket client communication with the game server.
-*   **`ArduinoJson`:** For parsing and serializing JSON messages.
-*   **`EasyNextionLibrary`:** For communication with the Nextion display.
-*   **`Preferences`:** For storing WiFi credentials and server settings in ESP32 flash.
+This project is built using the PlatformIO IDE with the Arduino framework for ESP32.
 
-## Core Firmware Structure (`src/`)
+**Key Libraries:**
+*   **`AccelStepper`:** For advanced stepper motor control (acceleration, deceleration, non-blocking movement).
+*   **`ESP32Servo`:** For servo motor control on ESP32.
+*   **`ArduinoWebsockets`:** For WebSocket client communication.
+*   **`ArduinoJson`:** For efficient parsing and serialization of JSON messages.
+*   **`EasyNextionLibrary`:** For simplified communication with the Nextion display.
+*   **`Preferences`:** ESP32 library for storing data persistently in flash memory (e.g., WiFi credentials).
+
+See `platformio.ini` for a complete list of dependencies and versions.
+
+## Firmware Architecture
+
+The firmware is organized within the `src/` directory:
 
 *   **`main.cpp`:**
-    *   Main setup and loop.
-    *   WiFi and WebSocket connection management.
-    *   WebSocket message handling (`handle_data`).
-    *   Nextion display updates (`load_nextion_page`) and event handling (`triggerX` functions).
-    *   Manual Orb rotation button logic.
-    *   Global `Board` and `MotionController` instances.
-    *   Coordination of logical board updates post-physical moves.
+    *   Main application entry point (`setup()` and `loop()`).
+    *   Manages WiFi and WebSocket connections.
+    *   Handles incoming WebSocket messages (`handle_data()`).
+    *   Interfaces with the Nextion display for UI updates (`load_nextion_page()`) and event handling (`triggerX()` functions).
+    *   Implements logic for manual Orb rotation buttons.
+    *   Instantiates and coordinates global `Board` and `MotionController` objects.
 *   **`MotionController.h` / `MotionController.cpp`:**
-    *   Manages all physical hardware (steppers, servos, actuator).
-    *   Implements a non-blocking state machine (`MotionState`) for executing complex sequences:
-        *   Homing all steppers.
-        *   Standard piece moves ("DO" sequence).
-        *   Capture sequences (moving a piece to the capture zone).
-        *   Pawn Promotion (simplified: moves pawn, logical/visual update).
-        *   Full Physical Board Reset sequence.
-    *   Includes safety checks (e.g., gripper rotation for low cart positions, capture motor homing for very low cart positions).
-    *   Handles actuator retract confirmation using the sensor
+    *   Encapsulates all hardware control logic (steppers, servos, linear actuator).
+    *   Implements a non-blocking state machine (`MotionState`) for executing complex movement sequences:
+        *   Homing all steppers (`HOMING`).
+        *   Standard piece moves (`DO_MOVE_PICKUP`, `DO_MOVE_PLACE`).
+        *   Capture sequences (`DO_CAPTURE_PICKUP`, `DO_CAPTURE_PLACE`).
+        *   Pawn Promotion (simplified physical move, logical update).
+        *   Full Physical Board Reset.
+    *   Includes safety interlocks (e.g., gripper rotation restrictions at certain cart positions).
+    *   Manages actuator retraction confirmation via the dedicated sensor.
 *   **`board.h` / `board.cpp`:**
-    *   Represents the logical state of the chessboard (8x8 grid of `Piece` pointers).
-    *   Methods for initializing the board, adding pieces, moving pieces logically, and printing the board state.
-    *   Helper to convert board coordinates to/from algebraic notation.
+    *   Represents the logical state of the 8x8 chessboard using `Piece` objects.
+    *   Provides methods for board initialization, piece manipulation (add, move), and state querying.
+    *   Includes utilities for converting between board coordinates and algebraic notation.
 *   **`piece.h`:**
-    *   Defines the base `Piece` class and derived classes for each piece type (Pawn, Rook, Knight, Bishop, Queen, King).
-    *   Includes `PieceType` and `PieceColor` enums.
-    *   Methods for getting piece symbol, position, Nextion image ID.
+    *   Defines the base `Piece` class and derived classes for each chess piece type (Pawn, Rook, Knight, Bishop, Queen, King).
+    *   Contains `PieceType` and `PieceColor` enumerations.
+    *   Provides methods for retrieving piece attributes (symbol, Nextion image ID).
 *   **`enums.h`:**
-    *   Defines various enums used throughout the project (e.g., `MESSAGE_TYPE` for WebSockets, `ORB_STATUS`, `SPECIAL_MOVES`, `NEXTION_PAGE`).
+    *   Centralizes various enumerations used throughout the project (e.g., `MESSAGE_TYPE`, `ORB_STATUS`, `SPECIAL_MOVES`, `NEXTION_PAGE`).
 *   **`config.h`:**
-    *   Project-specific configuration values (e.g., `ORB_ID`).
+    *   Contains project-specific compile-time configurations (e.g., `ORB_ID`).
 *   **`hardware_pins.h`:**
-    *   Centralized definitions for all GPIO pin assignments.
+    *   Defines all GPIO pin assignments for easy management and modification.
 
-## Setup & Usage
+## Getting Started
 
-1.  **Hardware Assembly:** Connect all components according to `hardware_pins.h` (or modify to match).
-2.  **PlatformIO:**
-    *   Open the project in PlatformIO (VS Code).
-    *   Select the correct `env` for your ESP32 board (e.g., `esp32dev`).
-3.  **WiFi & Server Configuration:**
-    *   On first boot, or if credentials are not set, the ESP32 may attempt to connect to default/empty credentials.
-    *   Use the Nextion "Settings" screen (if implemented) to input your WiFi SSID, Password, WebSocket Server Host/IP, and Port. These are saved to ESP32 Preferences.
-    *   Alternatively, you ca, hardcode initial credentials.
-4.  **Nextion HMI:** Upload the corresponding `.tft` file to your Nextion display.
-5.  **Build & Upload:** Build and upload the firmware to the ESP32.
-6.  **Operation:**
-    *   On boot, the robot will home itself.
-    *   It will then attempt to connect to WiFi and the WebSocket server.
-    *   The Nextion display should show connection status and the ORB Code.
-    *   The robot waits for `MOVE` commands from the server.
+### Prerequisites
+
+*   Familiarity with C++ and Arduino programming.
+*   PlatformIO IDE installed (typically within VS Code).
+*   All hardware components listed under [Hardware Requirements](#hardware-requirements).
+*   A Nextion display with the corresponding HMI project file (`.tft`).
+*   A running instance of the [Mat@ir Game Server](https://github.com/Nasser404/matair-server).
+
+### Hardware Assembly
+
+1.  Carefully connect all motors, drivers, sensors, buttons, and the Nextion display to the ESP32 according to the pin assignments in `src/hardware_pins.h`.
+    *   **Important:** Double-check wiring, especially for power and motor drivers, to prevent damage.
+2.  Ensure stepper motor drivers are correctly configured for current limits suitable for your motors.
+3.  Power the system using the specified power supply.
+
+### Software Setup
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/Nasser404/matair-esp32
+    cd matair-esp32
+    ```
+2.  **Open in PlatformIO:** Open the cloned project folder in VS Code with the PlatformIO extension installed.
+3.  **Select Environment:** Ensure the correct PlatformIO environment for your ESP32 board is selected (e.g., `esp32dev` in `platformio.ini`).
+4.  **Install Libraries:** PlatformIO should automatically detect and prompt to install the necessary libraries listed in `platformio.ini`. If not, you can install them manually via the PlatformIO Library Manager or by running `pio lib install`.
+
+## Configuration
+
+### WiFi & Server Credentials
+
+*   The firmware uses the ESP32 `Preferences` library to store WiFi SSID, password, WebSocket server host/IP, and port.
+*   **Initial Setup:**
+    *   These settings can be entered via the "Settings" screen on the Nextion display (if your HMI project supports this).
+    *   Alternatively, for initial testing, you might temporarily hardcode these values in `main.cpp` or a configuration file, but using the Nextion interface and Preferences is recommended for flexibility.
+    *   The ESP32 will attempt to load saved credentials on boot.
+### Nextion HMI
+
+1.  Ensure you have the Nextion Editor software.
+2.  Open your `.hmi` project file for the display.
+3.  Compile the HMI project to generate a `.tft` file.
+4.  Upload the `.tft` file to your Nextion display (SD card or direct serial connection).
+
+## Building & Uploading
+
+1.  **Connect ESP32:** Connect your ESP32 board to your computer via USB.
+2.  **Build:** In PlatformIO, click the "Build" button (checkmark icon) or run `pio run` in the terminal.
+3.  **Upload:** If the build is successful, click the "Upload" button (right arrow icon) or run `pio run --target upload`.
+
 
 ## Troubleshooting
-*   **Serial Monitor:** Use the Arduino Serial Monitor (baud rate 115200) for detailed debugging output from the ESP32.
-*   **Stepper Motor Issues:** Check wiring, driver current, and `AccelStepper` settings.
-*   **Servo Jitter:** Ensure a stable power supply for servos.
-*   **WebSocket Disconnects:** Verify server address/port, network stability, and PING/PONG handling. The server should PING, ESP32 should PONG (handled by `client.poll()`).
-*   **Nextion Communication:** Check Serial2 wiring (TX->RX, RX->TX) and baud rates.
+
+*   **Serial Monitor:** The primary tool for debugging. Open the PlatformIO Serial Monitor (baud rate usually 115200, as set in `setup()`). Look for `Serial.println()` messages for status and errors.
+*   **No WiFi/WebSocket Connection:**
+    *   Verify WiFi SSID and password are correct via Nextion settings or `Preferences`.
+    *   Ensure the WebSocket server IP/host and port are correctly configured.
+    *   Check that the WebSocket server is running and accessible on the network.
+    *   Monitor serial output for connection attempt details and error messages.
+*   **Stepper Motor Issues (No movement, erratic movement, wrong direction):**
+    *   **Wiring:** Triple-check motor phase wiring to the drivers and driver connections to the ESP32 (Step, Direction, Enable pins).
+    *   **Power:** Ensure motors and drivers have adequate and stable power.
+    *   **Driver Settings:** Verify microstepping and current limit settings on the stepper drivers.
+    *   **`AccelStepper` Config:** Review speed, acceleration, and steps-per-revolution settings in `MotionController.cpp`.
+    *   **Endstops:** Ensure limit switches are wired correctly and triggering reliably. Check logic levels (NO/NC).
+*   **Servo Jitter or No Movement:**
+    *   Ensure servos have a stable and sufficient power supply (often separate from ESP32 logic power).
+    *   Check signal wire connection to the ESP32.
+*   **Linear Actuator Issues:**
+    *   Verify L293N wiring and power.
+    *   Check the retraction sensor circuit and its connection to GPIO 13. Monitor serial output related to actuator state.
+*   **Nextion Display Not Working or Gibberish:**
+    *   Check Serial2 wiring: ESP32 TX2 (GPIO17) to Nextion RX, ESP32 RX2 (GPIO16) to Nextion TX.
+    *   Ensure baud rates match between `EasyNextionLibrary` initialization in `main.cpp` and the Nextion HMI project settings.
+    *   Confirm the correct `.tft` file is uploaded to the display.
+*   **PONG Not Sent / WebSocket Disconnects:** The `client.poll()` in the main loop is responsible for handling PING/PONG with the server. Ensure this is not blocked by long-running synchronous code.
