@@ -111,81 +111,34 @@ bool MotionController::getTargetsForSquare(String square, long &orbTarget, long 
   char fileChar = square.charAt(0);
   char rankChar = square.charAt(1);
 
-  orbTarget = -1;
-  cartTarget = -1;
-
-  switch (fileChar) {
-    case 'h': orbTarget = 4350; break;
-    case 'a': orbTarget = 3550; break;
-    case 'b': orbTarget = 2750; break;
-    case 'c': orbTarget = 1950; break;
-    case 'd': orbTarget = 1150; break;
-    case 'e': orbTarget = 350;  break;
-    case 'f': orbTarget = 5950; break;
-    case 'g': orbTarget = 5150; break;
-    default:
-      Serial.print("Error: Invalid file: ");
-      Serial.println(fileChar);
-      return false;
+  if (fileChar < 'a' || fileChar > 'h') {
+    Serial.print("Error: Invalid file: ");
+    Serial.println(fileChar);
+    return false;
   }
 
-  switch (rankChar) {
-    case '1': cartTarget = 4450; break;
-    case '2': cartTarget = 3850; break;
-    case '3': cartTarget = 3270; break;
-    case '4': cartTarget = 2670; break;
-    case '5': cartTarget = 2000; break;
-    case '6': cartTarget = 1380; break;
-    case '7': cartTarget = 680;  break;
-    case '8': cartTarget = 0;    break;
-    default:
-      Serial.print("Error: Invalid rank: ");
-      Serial.println(rankChar);
-      return false;
+  if (rankChar < '1' || rankChar > '8') {
+    Serial.print("Error: Invalid rank: ");
+    Serial.println(rankChar);
+    return false;
   }
 
+  int fileIndex = fileChar - 'a';
+  int rankIndex = rankChar - '1';
+
+  orbTarget = orbTargets[fileIndex];
+  cartTarget = cartTargets[rankIndex];
   return true;
 }
 
 bool MotionController::getTargetForCapture(int captureSlot, long &captureTarget) {
-  switch (captureSlot) {
-    case 1:  captureTarget = 2760; break;
-    case 2:  captureTarget = 2580; break;
-    case 3:  captureTarget = 2400; break;
-    case 4:  captureTarget = 2220; break;
-    case 5:  captureTarget = 2040; break;
-    case 6:  captureTarget = 1860; break;
-    case 7:  captureTarget = 1680; break;
-    case 8:  captureTarget = 1500; break;
-    case 9:  captureTarget = 1300; break;
-    case 10: captureTarget = 1130; break;
-    case 11: captureTarget = 940;  break;
-    case 12: captureTarget = 760;  break;
-    case 13: captureTarget = 580;  break;
-    case 14: captureTarget = 400;  break;
-    case 15: captureTarget = 220;  break;
-    case 16: captureTarget = 0;    break;
-    case 17: captureTarget = 6260; break;
-    case 18: captureTarget = 6080; break;
-    case 19: captureTarget = 5890; break;
-    case 20: captureTarget = 5710; break;
-    case 21: captureTarget = 5530; break;
-    case 22: captureTarget = 5350; break;
-    case 23: captureTarget = 5170; break;
-    case 24: captureTarget = 4970; break;
-    case 25: captureTarget = 4800; break;
-    case 26: captureTarget = 4610; break;
-    case 27: captureTarget = 4430; break;
-    case 28: captureTarget = 4240; break;
-    case 29: captureTarget = 4050; break;
-    case 30: captureTarget = 3870; break;
-    case 31: captureTarget = 8680; break;
-    case 32: captureTarget = 3510; break;
-    default:
-      Serial.print("Error: Invalid capture slot: ");
-      Serial.println(captureSlot);
-      return false;
+  if (captureSlot < 1 || captureSlot > 32) {
+    Serial.print("Error: Invalid capture slot: ");
+    Serial.println(captureSlot);
+    return false;
   }
+
+  captureTarget = captureTargets[captureSlot - 1];
   return true;
 }
 

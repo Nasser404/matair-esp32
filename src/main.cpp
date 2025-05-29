@@ -22,11 +22,11 @@ bool hasIdentified = false;
 void readCredentials() {
     prefs.begin("orb_cfg", true); // read-only
 
-    String s = prefs.getString("ssid", "");
-    String p = prefs.getString("pwd",  "");
-    String h = prefs.getString("host", "");
+    String s = prefs.getString("ssid", DEFAULT_SSID);
+    String p = prefs.getString("pwd",  DEFAULT_PWD);
+    String h = prefs.getString("host", DEFAULT_HOST);
   
-    uint32_t port = prefs.getUInt("port", 0);
+    uint32_t port = prefs.getUInt("port", DEFAULT_PORT);
   
     prefs.end();
   
