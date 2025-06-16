@@ -1,7 +1,8 @@
-#include "MotionController.h"
-#include "hardware_pins.h" 
 #include <ArduinoWebsockets.h>
 
+#include "MotionController.h"
+#include "hardware_pins.h" 
+#include "config.h"
 extern websockets::WebsocketsClient client; 
 extern Board board;
 
