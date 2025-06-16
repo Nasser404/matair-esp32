@@ -12,10 +12,17 @@ static const String  DEFAULT_PWD    = "";
 static const String  DEFAULT_HOST   = "127.0.0.1";
 const uint32_t       DEFAULT_PORT   = 29920;
 
-
-
 // --- POSITION CONFIG ----
-const uint16_t orbTargets[8] = {4350, 3550, 2750, 1950, 1150, 350, 5950, 5150};   // a-h
+const uint16_t orbTargets[8] = {
+    3550, // a
+    2750, // b
+    1950, // c
+    1150, // d
+    350,  // e
+    5950, // f
+    5150, // g
+    4350  // h
+};
 const uint16_t cartTargets[8] = {4450, 3850, 3270, 2670, 2000, 1380, 680, 0};     // ranks 1-8
 const uint16_t captureTargets[32] = {
   2760, 2580, 2400, 2220, 2040, 1860, 1680, 1500,
