@@ -80,8 +80,8 @@ void MotionController::setup() {
     stepper3.setMaxSpeed(STEPPER_SPEED);
     stepper3.setAcceleration(STEPPER_ACCEL);
 
-    servo1.attach(ROTATION_SERVO_PIN);
-    servo2.attach(GRIPPER_SERVO_PIN);
+    servo1.attach(ROTATION_SERVO_PIN, 500, 2500);
+    servo2.attach(GRIPPER_SERVO_PIN, 500, 2500);
     servo1.write(GRIPPER_ROT_BOARD);
     servo2.write(GripperOpen);
 

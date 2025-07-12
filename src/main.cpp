@@ -645,148 +645,149 @@ void trigger1() {  Serial.println("Nextion Home Button Pressed.");
 
 // === CART Stepper ===
 void trigger2() { // Cart + PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-        Serial.println("Nextion: Cart + PRESS");
-        motionController.startManualJog(ManualActuator::CART, true);
-    }
+
+    Serial.println("Nextion: Cart + PRESS");
+    motionController.startManualJog(ManualActuator::CART, true);
+
+    
 }
 void trigger3() { // Cart + RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-        Serial.println("Nextion: Cart + RELEASE");
-        motionController.stopManualJog(ManualActuator::CART);
-    }
+
+    Serial.println("Nextion: Cart + RELEASE");
+    motionController.stopManualJog(ManualActuator::CART);
+    
 }
 void trigger4() { // Cart - PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-        Serial.println("Nextion: Cart - PRESS");
-        motionController.startManualJog(ManualActuator::CART, false);
-    }
+
+    Serial.println("Nextion: Cart - PRESS");
+    motionController.startManualJog(ManualActuator::CART, false);
+    
 }
 void trigger5() { // Cart - RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-        Serial.println("Nextion: Cart - RELEASE");
-        motionController.stopManualJog(ManualActuator::CART);
-    }
+
+    Serial.println("Nextion: Cart - RELEASE");
+    motionController.stopManualJog(ManualActuator::CART);
+
 }
 
 // === ORB Stepper ===
 void trigger6() { // Orb + PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Orb + PRESS");
         motionController.startManualJog(ManualActuator::ORB, true);
-    }
+    
 }
 void trigger7() { // Orb + RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Orb + RELEASE");
         motionController.stopManualJog(ManualActuator::ORB);
-    }
+    
 }
 void trigger8() { // Orb - PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Orb - PRESS");
         motionController.startManualJog(ManualActuator::ORB, false);
-    }
+    
 }
 void trigger9() { // Orb - RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Orb - RELEASE");
         motionController.stopManualJog(ManualActuator::ORB);
-    }
+    
 }
 
 // === CAPTURE Stepper ===
 void trigger10() { // Capture + PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Capture + PRESS");
         motionController.startManualJog(ManualActuator::CAPTURE, true);
-    }
+    
 }
 void trigger11() { // Capture + RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Capture + RELEASE");
         motionController.stopManualJog(ManualActuator::CAPTURE);
-    }
+    
 }
 void trigger12() { // Capture - PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Capture - PRESS");
         motionController.startManualJog(ManualActuator::CAPTURE, false);
-    }
+    
 }
 void trigger13() { // Capture - RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Capture - RELEASE");
         motionController.stopManualJog(ManualActuator::CAPTURE);
-    }
+    
 }
 
 // === GRIPPER ROTATION (Servo1) ===
 void trigger14() { // Gripper Rot + PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Gripper Rot + PRESS (Step)");
         motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, true); // True = more positive angle
-    }
+    
 }
 void trigger15() { // Gripper Rot + RELEASE - Does nothing for stepped servo control
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-    }
+    
+    
 }
 void trigger16() { // Gripper Rot - PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Gripper Rot - PRESS (Step)");
         motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, false); // False = more negative angle
-    }
+    
 }
 void trigger17() { // Gripper Rot - RELEASE - Does nothing
-    if (nextion.currentPageId == CONTROL_SCREEN) {;
-    }
+    
+    
 }
 
 // === LINEAR ACTUATOR ===
 void trigger18() { // Linear Actuator + PRESS (Extend)
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Linear Actuator + PRESS (Extend)");
         motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, true); // True = Extend
-    }
+    
 }
 void trigger19() { // Linear Actuator + RELEASE (Stop Extend)
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Linear Actuator + RELEASE (Stop)");
         motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
-    }
+    
 }
 void trigger20() { // Linear Actuator - PRESS (Retract)
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Linear Actuator - PRESS (Retract)");
         motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, false); // False = Retract
-    }
+    
 }
 void trigger21() { // Linear Actuator - RELEASE (Stop Retract)
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Linear Actuator - RELEASE (Stop)");
         motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
-    }
+    
 }
 
 // === GRIPPER OPEN/CLOSE (Servo2) ===
 void trigger22() { // Gripper Open + PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Gripper Open + PRESS (Step)");
         motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, true); 
-    }
+    
 }
 void trigger23() { // Gripper Open + RELEASE - Does nothing
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-    }
+    
+    
 }
 void trigger24() { // Gripper Close - PRESS
-    if (nextion.currentPageId == CONTROL_SCREEN) {
+    
         Serial.println("Nextion: Gripper Close - PRESS (Step)");
         motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, false);
-    }
+    
 }
 void trigger25() { // Gripper Close - RELEASE
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-    }
+    
+    
 }
