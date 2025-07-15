@@ -2,10 +2,12 @@
 
 #include "MotionController.h"
 #include "hardware_pins.h" 
+#include <EasyNextionLibrary.h>
 #include "config.h"
 extern websockets::WebsocketsClient client; 
 extern Board board;
-
+extern void change_nextion_page(int newPageId, bool force_change = false);
+extern EasyNex nextion;
 // --- Constructor ---
 MotionController::MotionController() :
     // Initialize Stepper objects with their type, step pin, and direction pin
@@ -15,8 +17,10 @@ MotionController::MotionController() :
 
     // Initialize state variables
     currentState(MOTION_IDLE),
+    previousState(MOTION_IDLE),
     stateStartTime(0),
-
+    idleEntryTime(0),
+    servoDisabled(false),
     // Initialize target data
     targetFromLoc(""),
     targetToLoc(""),
@@ -48,6 +52,8 @@ MotionController::MotionController() :
     stateToReturnToAfterSubSequence(MOTION_IDLE),
     subSequenceIsActive(false),
     lastMoveWasResetSubMoveFlag(false) 
+
+
 {
     // Initialize pair members 
     reset_currentBoardCoords = {-1, -1};
@@ -94,7 +100,8 @@ void MotionController::setup() {
     pinMode(BUTTON_PIN_1, INPUT);
     pinMode(BUTTON_PIN_2, INPUT);
 
-    currentState = MOTION_IDLE; 
+    currentState  = MOTION_IDLE; 
+    previousState = ERROR_STATE;
     Serial.println("MotionController::setup() complete. Waiting for Homing/Commands.");
     initializeCaptureZone(); // Initialize capture zone 
     startHomingSequence();
@@ -153,80 +160,161 @@ bool MotionController::startManualJog(ManualActuator actuator, bool positiveDire
         return false;
     }
 
-    currentJoggingActuator = actuator; // Store which one we are jogging
-    jogDirectionPositive = positiveDirection;
+    // No need for currentJoggingActuator or jogDirectionPositive if we are not using a state machine for jogging
+    // This function will be called on "Button Down" from Nextion
 
     Serial.print("MC_Jog: Starting jog for ");
     float speed = 0;
 
     switch (actuator) {
-        case ManualActuator::CART:
+        case ManualActuator::STEPPER_CART: {
             Serial.print("CART, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+            // === Cart Software Limit Check ===
+            if (positiveDirection && stepper2.currentPosition() >= CART_MAX_POS) {
+                Serial.println("  Cart at MAX limit. Not moving.");
+                return false; 
+            }
+            if (!positiveDirection && stepper2.currentPosition() <= CART_MIN_POS) {
+                Serial.println("  Cart at MIN limit (Home). Not moving.");
+                return false;
+            }
+
+            // === Cart SAFETY Checks ===
+            if (!positiveDirection) { 
+                // --- Gripper Rotation Safety Check (< 2250) ---
+                if (stepper2.currentPosition() < CART_SAFETY_THRESHOLD) {
+                    if (servo1.read() != GRIPPER_ROT_BOARD) {
+                         Serial.println("!!! SAFETY JOG STOP !!! Cart is in safety zone (<2250) but gripper is rotated!");
+                         Serial.println("  Rotate gripper to 0 before jogging Cart further towards home.");
+                         return false; // ABORT THE JOG COMMAND
+                    }
+                }
+                // --- Capture Homing Safety Check (< 800) ---
+                if (stepper2.currentPosition() < CART_CAPTURE_HOME_THRESHOLD) {
+                    if (stepper1.currentPosition() != 0) {
+                         Serial.println("!!! SAFETY JOG STOP !!! Cart is in critical zone (<800) but Capture motor is not home!");
+                         Serial.println("  Home the Capture motor before jogging Cart further.");
+                         return false; // ABORT THE JOG COMMAND
+                    }
+                }
+            }
             stepper2.enableOutputs();
             speed = positiveDirection ? MANUAL_JOG_CART_SPEED : -MANUAL_JOG_CART_SPEED;
             stepper2.setSpeed(speed);
+            stepper2.runSpeed();
             break;
-        case ManualActuator::ORB:
+        }
+
+        case ManualActuator::STEPPER_ORB: {
             Serial.print("ORB, Dir: "); Serial.println(positiveDirection ? "+" : "-");
-            // Apply limits for Orb
-            if (positiveDirection && stepper3.currentPosition() >= ORB_MANUAL_MAX_POS) {
-                Serial.println("  Orb at MAX, not moving."); return false; // Don't start
+
+            // === Orb Software Limit Check ===
+            if (positiveDirection && stepper3.currentPosition() >= ORB_MAX_POS) {
+                Serial.println("  Orb at MAX limit. Not moving.");
+                return false; 
             }
-            if (!positiveDirection && stepper3.currentPosition() <= ORB_MANUAL_MIN_POS) {
-                Serial.println("  Orb at MIN, not moving."); return false; // Don't start
+            if (!positiveDirection && stepper3.currentPosition() <= ORB_MIN_POS) {
+                Serial.println("  Orb at MIN limit (Home). Not moving.");
+                return false;
             }
+
             stepper3.enableOutputs();
             speed = positiveDirection ? MANUAL_JOG_ORB_SPEED : -MANUAL_JOG_ORB_SPEED;
             stepper3.setSpeed(speed);
+            stepper3.runSpeed();
             break;
-        case ManualActuator::CAPTURE:
+        }
+
+        case ManualActuator::STEPPER_CAPTURE: {
             Serial.print("CAPTURE, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+
+            // === Capture Software Limit Check ===
+            if (positiveDirection && stepper1.currentPosition() >= CAPTURE_MAX_POS) {
+                Serial.println("  Capture at MAX limit. Not moving.");
+                return false;
+            }
+            if (!positiveDirection && stepper1.currentPosition() <= CAPTURE_MIN_POS) {
+                Serial.println("  Capture at MIN limit (Home). Not moving.");
+                return false;
+            }
+
+            // === Capture SAFETY Check ===
+            // Cannot move Capture away from home if Cart is in the critical zone
+            if (stepper2.currentPosition() < CART_CAPTURE_HOME_THRESHOLD && stepper1.currentPosition() == 0 && positiveDirection) {
+                 Serial.println("!!! SAFETY JOG STOP !!! Cannot move Capture away from home while Cart is in critical zone (<800).");
+                 return false; 
+            }
+
             stepper1.enableOutputs();
             speed = positiveDirection ? MANUAL_JOG_CAPTURE_SPEED : -MANUAL_JOG_CAPTURE_SPEED;
             stepper1.setSpeed(speed);
+            stepper1.runSpeed();
             break;
-        case ManualActuator::GRIPPER_ROTATION: {// Servo1
+        }
+
+        case ManualActuator::GRIPPER_ROTATION: { // Servo1
             Serial.print("GRIPPER_ROT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
+
+            // === Gripper Rotation SAFETY Check (related to Cart position) ===
+            // Cannot rotate gripper away from 0 if Cart is in the safety zone
+            if (stepper2.currentPosition() < CART_SAFETY_THRESHOLD) {
+                if (positiveDirection) { // Trying to rotate away from 0
+                    Serial.println("!!! SAFETY JOG STOP !!! Cannot rotate gripper while Cart is in safety zone (<2250).");
+                    Serial.println("  Move Cart past 2250 first.");
+                    return false; // ABORT
+                }
+            }
+
             int currentAngle1 = servo1.read();
             int newAngle1 = currentAngle1 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
-            servo1.write(constrain(newAngle1, 0, 180));
-            return true; 
+            servo1.write(constrain(newAngle1, GRIPPER_ROT_CAPTURE, GRIPPER_ROT_BOARD));
+            // For servos, this is a single action, not a continuous jog start
+            // The Nextion "Press" event will move it one increment.
+            // If you want continuous, the Nextion needs to send repeated press events,
+            // or we need a state machine here. Let's assume one increment per press.
+            return true;
         }
-            break;
-        case ManualActuator::GRIPPER_OPEN_CLOSE: {// Servo2
+
+        case ManualActuator::GRIPPER_OPEN_CLOSE: { // Servo2
             Serial.print("GRIPPER_OC, Dir: "); Serial.println(positiveDirection ? "+" : "-");
             int currentAngle2 = servo2.read();
-
             int newAngle2 = currentAngle2 + (positiveDirection ? MANUAL_JOG_SERVO_INCREMENT : -MANUAL_JOG_SERVO_INCREMENT);
-            servo2.write(constrain(newAngle2, GripperClose - 10, GripperOpen + 10)); 
-            return true; 
+            servo2.write(constrain(newAngle2, GripperClose, GripperOpen)); // Use defined limits
+            return true;
         }
-            break;
-        case ManualActuator::LINEAR_ACTUATOR:
+
+        case ManualActuator::LINEAR_ACTUATOR: {
             Serial.print("LIN_ACT, Dir: "); Serial.println(positiveDirection ? "+" : "-");
-            if (positiveDirection) commandExtendActuator(); 
-            else commandRetractActuator();
+            if (positiveDirection) { // Extend
+                commandExtendActuator();
+            } else { // Retract
+                commandRetractActuator();
+            }
             break;
-    }
-    return true;
+        }
+    } 
+    return true; 
 }
+
 
 bool MotionController::stopManualJog(ManualActuator actuator) {
 
     Serial.print("MC_Jog: Stopping jog for ");
     switch (actuator) {
-        case ManualActuator::CART:
+        case ManualActuator::STEPPER_CART:
             Serial.println("CART");
             stepper2.setSpeed(0);
-           
+            stepper2.disableOutputs();
             break;
-        case ManualActuator::ORB:
+        case ManualActuator::STEPPER_ORB:
             Serial.println("ORB");
             stepper3.setSpeed(0);
+            stepper3.disableOutputs();
             break;
-        case ManualActuator::CAPTURE:
+        case ManualActuator::STEPPER_CAPTURE:
             Serial.println("CAPTURE");
             stepper1.setSpeed(0);
+            stepper1.disableOutputs();
             break;
         case ManualActuator::GRIPPER_ROTATION:
              Serial.println("GRIPPER_ROT (no continuous stop needed)");
@@ -593,7 +681,18 @@ void MotionController::executeStateMachine()
     switch (currentState)
     {
 
-    case MOTION_IDLE:  break;
+    case MOTION_IDLE: 
+      if (currentState != previousState) {
+        idleEntryTime = millis();
+        servoDisabled = false; // Reset flag so it runs again on next entry
+      }
+
+      // Wait 1 second after entering IDLE to disable servo
+      if (!servoDisabled && millis() - idleEntryTime >= 1000) {
+        digitalWrite(GRIPPER_SERVO_PIN, LOW); // PWM PIN SET AT LOW TO DIABLE SERVO
+        servoDisabled = true;
+      }
+    break;
 
     // =================== HOMING SEQUENCE ===================
     case HOMING_START:
@@ -624,12 +723,12 @@ void MotionController::executeStateMachine()
         }
         break;
 
-    case HOMING_CAPTURE_START_HOME_MOVE: // <<< RENAMED
+    case HOMING_CAPTURE_START_HOME_MOVE:
         Serial.println("[MC State] HOMING_CAPTURE_START_HOME_MOVE: Commanding Capture home move...");
         stepper1.setMaxSpeed(abs(HOMING_SPEED_CAPTURE)); 
         stepper1.setAcceleration(HOMING_ACCEL);
         stepper1.enableOutputs();
-        stepper1.move(-30000); // Move towards the endstop (negative)
+        stepper1.move(-30000); // Move towards the endstop
         currentState = HOMING_CAPTURE_WAIT_HIT;
         stateStartTime = millis();
         break;
@@ -651,7 +750,7 @@ void MotionController::executeStateMachine()
 
     case HOMING_CART_ORB_START_MOVE:
         Serial.println("[MC State] HOMING_CART_ORB_START_MOVE: Commanding Cart & Orb home moves...");
-        // Prepare for Phase 2: Home Cart & Orb Steppers Simultaneously
+        //  Home Cart & Orb Steppers Simultaneously
         stepper2.setMaxSpeed(abs(HOMING_SPEED_CART_ORB));
         stepper2.setAcceleration(HOMING_ACCEL);
         stepper2.enableOutputs();
@@ -734,7 +833,7 @@ void MotionController::executeStateMachine()
         break;
 
     // === Phase 1: Clear ALL Pieces from Board to Capture Zone ===
-    case RESET_P1_ITERATE_BOARD:
+    case RESET_P1_ITERATE_BOARD: {
         reset_currentBoardCoords.first = resetBoardIterator % 8;
         reset_currentBoardCoords.second = resetBoardIterator / 8;
         reset_currentBoardAlg = coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second);
@@ -744,7 +843,10 @@ void MotionController::executeStateMachine()
         Serial.print(" (");
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
-
+        
+        int progress = resetBoardIterator/64;
+        nextion.writeNum("b_reset_bar.val", progress);
+        nextion.writeStr("b_reset_text.txt", "Clearing Board");
         if (resetBoardIterator >= 64)
         {
             Serial.println("  Phase 1 (Clear Misplaced Board Pieces) Complete -> RESET_P2_START");
@@ -757,9 +859,10 @@ void MotionController::executeStateMachine()
             currentState = RESET_P1_CHECK_SQUARE_FOR_CLEAR;
             stateStartTime = millis();
         }
+    }
         break;
 
-    case RESET_P1_CHECK_SQUARE_FOR_CLEAR:
+    case RESET_P1_CHECK_SQUARE_FOR_CLEAR: {
     {
         Piece *pieceOnSquareP1 = board.grid[reset_currentBoardCoords.first][reset_currentBoardCoords.second];
         bool pieceToClearFromBoard = false;
@@ -818,6 +921,7 @@ void MotionController::executeStateMachine()
         }
         stateStartTime = millis();
     }
+}
     break;
 
     case RESET_P1_MOVE_TO_GRAB_FROM_BOARD:
@@ -1149,9 +1253,14 @@ void MotionController::executeStateMachine()
         stateStartTime = millis();
         break;
 
-    case RESET_P2_ITERATE_CZ:
+    case RESET_P2_ITERATE_CZ: {
         Serial.print("[MC Reset P2] ITERATE_CZ: Slot ");
         Serial.println(resetCZIterator);
+
+
+        int progress = resetCZIterator/32;
+        nextion.writeNum("b_reset_bar.val", progress);
+        nextion.writeStr("b_reset_text.txt", "Placing back pieces");
         if (resetCZIterator >= 32)
         { // Done checking all CZ slots
             Serial.println("  Phase 2 (Place ALL from CZ) Complete -> RESET_P3_START");
@@ -1164,6 +1273,7 @@ void MotionController::executeStateMachine()
             currentState = RESET_P2_CHECK_CZ_PIECE; // Check current slot
             stateStartTime = millis();
         }
+    }
         break;
 
     case RESET_P2_CHECK_CZ_PIECE:
@@ -1532,7 +1642,7 @@ void MotionController::executeStateMachine()
         stateStartTime = millis();
         break;
 
-    case RESET_P3_ITERATE_BOARD:
+    case RESET_P3_ITERATE_BOARD: {
         reset_currentBoardCoords.first = resetBoardIterator % 8;
         reset_currentBoardCoords.second = resetBoardIterator / 8;
         reset_currentBoardAlg = coordsToAlgebraic(reset_currentBoardCoords.first, reset_currentBoardCoords.second);
@@ -1542,6 +1652,10 @@ void MotionController::executeStateMachine()
         Serial.print(" (");
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
+
+        int progress = resetBoardIterator/64;
+        nextion.writeNum("b_reset_bar.val", progress);
+        nextion.writeStr("b_reset_text.txt", "Final check");
 
         if (resetBoardIterator >= 64)
         { // Done with all board squares for phase 3
@@ -1554,6 +1668,7 @@ void MotionController::executeStateMachine()
             currentState = RESET_P3_CHECK_BOARD_PIECE;
             stateStartTime = millis();
         }
+    }
         break;
 
     case RESET_P3_CHECK_BOARD_PIECE:
@@ -1684,12 +1799,15 @@ void MotionController::executeStateMachine()
         break;
 
     // === Phase 4: Finish ===
-    case RESET_P4_HOME_CAPTURE_MOTOR:
+    case RESET_P4_HOME_CAPTURE_MOTOR: {
+        nextion.writeStr("b_reset_text.txt", "Almost Done");
+        
         Serial.println("[MC Reset P4] HOME_CAPTURE_MOTOR");
         stepper1.moveTo(0);
         stepper1.enableOutputs();
         currentState = RESET_P4_WAIT_CAPTURE_MOTOR;
         stateStartTime = millis();
+    }
         break;
 
     case RESET_P4_WAIT_CAPTURE_MOTOR:
@@ -1721,6 +1839,7 @@ void MotionController::executeStateMachine()
         Serial.println("[MC Reset] RESET_COMPLETE -> MOTION_IDLE");
         currentState = MOTION_IDLE;
         stateStartTime = millis();
+        change_nextion_page(HOME_SCREEN, true);
         break;
 
     // =================== CAPTURE SEQUENCE ==================
@@ -2384,6 +2503,7 @@ void MotionController::executeStateMachine()
 
     case ERROR_STATE:
         Serial.println("!!! Motion Controller in ERROR STATE !!!");
+        change_nextion_page(ERROR_STATE_SCREEN);
 
         break;
 
@@ -2393,6 +2513,8 @@ void MotionController::executeStateMachine()
         currentState = ERROR_STATE;
         break;
     }
+
+    previousState = currentState;
 }
 MotionState MotionController::getCurrentState() const
 {

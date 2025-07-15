@@ -1,4 +1,6 @@
 #pragma once 
+
+
 enum MESSAGE_TYPE {
     IDENTIFICATION          = 0,           
     
@@ -51,7 +53,14 @@ enum SPECIAL_MOVES {
 
 };
 
-
+enum ManualActuator {
+    STEPPER_CART,
+    STEPPER_ORB,
+    STEPPER_CAPTURE,
+    GRIPPER_ROTATION,
+    GRIPPER_OPEN_CLOSE,
+    LINEAR_ACTUATOR
+};
 enum NEXTION_PAGE { // GET THE CORRESPONDING ID IN THE NEXTION EDITOR
     HOME_SCREEN             = 0,
     BOARD_SCREEN            = 1,
@@ -61,4 +70,16 @@ enum NEXTION_PAGE { // GET THE CORRESPONDING ID IN THE NEXTION EDITOR
     CONTROL_ORB_SCREEN      = 5,
     CONTROL_CAPTURE_SCREEN  = 6,
 
+    CONNECTION_LOST_SCREEN   = 7,
+    ERROR_STATE_SCREEN       = 8,
+    RESET_IN_PROGRESS_SCREEN = 9,
+    BEFORE_REBOOT_SCREEN    = 10,
+    ASK_PIECES_SCREEN        = 11,    
+    
+    NUMBER_OF_PAGE
+
 };
+
+extern const int pagePriorities[];
+extern const char* pageCommands[];
+

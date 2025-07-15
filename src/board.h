@@ -18,4 +18,5 @@ class Board {
         String getSquareString(std::pair<int, int> pos);
         int getSquareNextionId(std::pair<int, int> pos);
         void resetBoard();
+        bool isAtStartingPosition() const;
     };

@@ -192,14 +192,7 @@ enum MotionState {
     ERROR_STATE
 };
 
-enum class ManualActuator {
-    CART,
-    ORB,
-    CAPTURE,
-    GRIPPER_ROTATION, // Servo1
-    GRIPPER_OPEN_CLOSE, // Servo2
-    LINEAR_ACTUATOR
-};
+
 class MotionController {
 public:
     MotionController();
@@ -220,18 +213,24 @@ public:
     bool getResetSubMoveDetails(std::pair<int, int>& from, std::pair<int, int>& to);
 
     AccelStepper stepper3;
-
-
-private:
-    ManualActuator currentJoggingActuator;
-    bool jogDirectionPositive;
     AccelStepper stepper1;
     AccelStepper stepper2;
+
+private:
+
+    char ManualJogServoAngle   = GRIPPER_ROT_BOARD;
+    char ManualJobGripperAngle = GripperOpen;
+    bool UpdatedManualJobAngle = false;
+
+    ManualActuator currentJoggingActuator;
+    bool jogDirectionPositive;
+
     
     Servo servo1;
     Servo servo2;
 
     MotionState currentState;
+    MotionState previousState;
     MotionState stateToReturnToAfterSubSequence; 
     bool subSequenceIsActive;                  
     unsigned long stateStartTime;
@@ -274,6 +273,9 @@ private:
     std::pair<int, int> resetSubMoveFromCoords; // Store FROM for P3 sub-move
     std::pair<int, int> resetSubMoveToCoords;   // Store TO for P3 sub-move
 
+
+    unsigned long idleEntryTime;
+    bool servoDisabled;
     // Helper functions
     bool getTargetsForSquare(String square, long &orbTarget, long &cartTarget);
     bool getTargetForCapture(int captureSlot, long &captureTarget);

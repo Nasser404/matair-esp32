@@ -41,13 +41,17 @@ const uint16_t ACTUATOR_TRAVEL_TIME_MS = 650;
 
 const uint8_t CAPTURE_HOME_BACKUP_STEPS = 200;
 
-// WITH BUTTON
-const uint8_t ORB_MANUAL_MIN_POS = 10;
-const uint16_t ORB_MANUAL_MAX_POS = 6000;
-const uint16_t MANUAL_ORB_SPEED = 500;
+const uint16_t MANUAL_JOG_CART_SPEED = 1000;
+const uint16_t MANUAL_JOG_ORB_SPEED = 500;
+const uint16_t MANUAL_JOG_CAPTURE_SPEED = 500;
+const uint8_t  MANUAL_JOG_SERVO_INCREMENT = 15;
 
-// WITH NEXTION / Python App
-const uint16_t MANUAL_JOG_CART_SPEED = 1500;
-const uint16_t MANUAL_JOG_ORB_SPEED = 1000;
-const uint16_t MANUAL_JOG_CAPTURE_SPEED = 800;
-const uint8_t  MANUAL_JOG_SERVO_INCREMENT = 3;
+// --- Travel Limits ---
+const long CART_MIN_POS = 10;
+const long CART_MAX_POS = 4400; 
+
+const long ORB_MIN_POS = 10;
+const long ORB_MAX_POS = 6000; 
+
+const long CAPTURE_MIN_POS = 100;
+const long CAPTURE_MAX_POS = 6100; 

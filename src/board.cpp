@@ -1,8 +1,5 @@
 #include <board.h>
 Board::Board() {
-    for (int i = 0; i < 8; ++i)
-        for (int j = 0; j < 8; ++j)
-            grid[i][j] = nullptr;
     initializeBoard();
 }
 
@@ -73,6 +70,13 @@ void Board::printBoard() const {
 
 void Board::initializeBoard() {
     for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            delete grid[i][j];
+            grid[i][j] = nullptr;
+        }
+    }
+
+    for (int i = 0; i < 8; ++i) {
         addPiece(PieceType::PAWN, PieceColor::BLACK, {i, 1});
         addPiece(PieceType::PAWN, PieceColor::WHITE, {i, 6});
     }
@@ -92,8 +96,7 @@ void Board::initializeBoard() {
     addPiece(PieceType::QUEEN, PieceColor::WHITE, {3, 7});
     addPiece(PieceType::KING, PieceColor::BLACK, {4, 0});
     addPiece(PieceType::KING, PieceColor::WHITE, {4, 7});
-
-};
+}
 String Board::getBoardString() {
     String boardString;
     for (int i = 0; i < 8; ++i) {
@@ -124,14 +127,47 @@ int Board::getSquareNextionId(std::pair<int, int> pos) {
 }
 
 void Board::resetBoard() {
-    // Delete existing pieces
+    initializeBoard();
+}
+
+bool Board::isAtStartingPosition() const {
+    // Create a temporary standard board to compare against
+    Board standardBoard; // This calls the constructor, which calls initializeBoard()
+
+    // Iterate through every square
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 8; ++j) {
-            delete grid[i][j];  // Free memory
-            grid[i][j] = nullptr;
+            Piece* currentPiece = this->grid[i][j]; // The piece on our actual board
+            Piece* standardPiece = standardBoard.grid[i][j]; // The piece that SHOULD be here
+
+            // Case 1: Both squares are empty
+            if (currentPiece == nullptr && standardPiece == nullptr) {
+                continue; // This square is correct, check the next one
+            }
+
+            // Case 2: One square is empty and the other is not
+            if ((currentPiece == nullptr && standardPiece != nullptr) ||
+                (currentPiece != nullptr && standardPiece == nullptr)) {
+                Serial.print("Board mismatch: Square ("); Serial.print(i); Serial.print(","); Serial.print(j);
+                Serial.println(") has a piece when it should be empty, or vice-versa.");
+                // No need to delete standardBoard pieces, its destructor will handle it when it goes out of scope.
+                return false; // Mismatch found
+            }
+
+            // Case 3: Both squares have pieces, check if they are the same type and color
+            if (currentPiece->getType() != standardPiece->getType() ||
+                currentPiece->getColor() != standardPiece->getColor()) {
+                Serial.print("Board mismatch: Square ("); Serial.print(i); Serial.print(","); Serial.print(j);
+                Serial.print(") has piece "); Serial.print(currentPiece->getSymbol());
+                Serial.print(" but should have "); Serial.println(standardPiece->getSymbol());
+                // No need to delete standardBoard pieces, its destructor will handle it when it goes out of scope.
+                return false; // Mismatch found
+            }
+
+            // If we get here, the pieces on this square match. Continue to next square.
         }
     }
 
-    // Reinitialize pieces
-    initializeBoard();
+    // If the loop completes without finding any mismatches, the board is in the starting position
+    return true;
 }
