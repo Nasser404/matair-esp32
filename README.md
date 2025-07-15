@@ -47,26 +47,20 @@ This project is built using the PlatformIO IDE with the Arduino framework for ES
 
 *   The firmware uses the ESP32 `Preferences` library to store WiFi SSID, password, WebSocket server host/IP, and port.
 *   **Initial Setup:**
-    *   These settings can be entered via the "Settings" screen on the Nextion display (if your HMI project supports this).
-    *   Alternatively, for initial testing, you might temporarily hardcode these values in `main.cpp` or a configuration file, but using the Nextion interface and Preferences is recommended for flexibility.
+    *   These settings can be entered via the "Settings" screen on the Nextion display.
+    *   Alternatively, for initial testing, you might temporarily hardcode these values in `main.cpp`.
     *   The ESP32 will attempt to load saved credentials on boot.
 ### Nextion HMI
-
-1.  Ensure you have the Nextion Editor software.
-2.  Open your `.hmi` project file for the display.
-3.  Compile the HMI project to generate a `.tft` file.
-4.  Upload the `.tft` file to your Nextion display (SD card or direct serial connection).
+*  Upload the `.tft` file to your Nextion display (SD card or direct serial connection).
 
 ## Building & Uploading
-
 1.  **Connect ESP32:** Connect your ESP32 board to your computer via USB.
-2.  **Build:** In PlatformIO, click the "Build" button (checkmark icon) or run `pio run` in the terminal.
-3.  **Upload:** If the build is successful, click the "Upload" button (right arrow icon) or run `pio run --target upload`.
+2.  **Build:** In PlatformIO, click the "Build" button or run `pio run`.
+3.  **Upload:** Click the "Upload" button (right arrow icon) or run `pio run --target upload`.
 
 
 ## Troubleshooting
-*   **No WiFi/WebSocket Connection:**
-    *   Verify WiFi SSID and password are correct via Nextion settings or `Preferences`.
-    *   Ensure the WebSocket server IP/host and port are correctly configured.
-    *   Check that the WebSocket server is running and accessible on the network.
-    *   Monitor serial output for connection attempt details and error messages.
+  *   Verify WiFi SSID and password are correct via Nextion settings or `Preferences`.
+  *   Ensure the WebSocket server IP/host and port are correctly configured.
+  *   Check that the WebSocket server is running and accessible on the network.
+  *   Monitor serial output for connection attempt details and error messages.
