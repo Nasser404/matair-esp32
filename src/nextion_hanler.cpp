@@ -1,8 +1,7 @@
-// --- START OF FILE nextion_handler.cpp ---
+
 #include "nextion_handler.h"
-#include <Arduino.h> // For millis() and Serial
+#include <Arduino.h> 
 // --- Externally defined variables and functions from main.cpp ---
-// We need access to these to update them or call them from triggers
 extern char ssid[];
 extern char password[];
 extern char websockets_server_host[];
@@ -14,6 +13,7 @@ extern bool CONNECTED_TO_SERVER;
 extern void writeCredentials();
 extern bool RESET_ASKED;
 extern bool REBOOT_ASKED;
+extern bool proper_bootup;
 const int pagePriorities[NUMBER_OF_PAGE] = {
   1, // HOME_SCREEN
   1, // BOARD_SCREEN
@@ -40,29 +40,34 @@ const char* pageCommands[NUMBER_OF_PAGE] = {
   "page connect_lost",
   "page error_screen",
   "page before_reboot",
+  "page ask_piece"
 };
 
 
 NextionHandler::NextionHandler(MotionController& mc, Board& b) :
-    nextion(Serial2), // Initialize EasyNex on Serial2
+    nextion(Serial2), 
     
     motionController(mc),
     board(b) {
-    // Constructor body
 }
 
 void NextionHandler::setup() {
     nextion.begin(9600);
     nextion.lastCurrentPageId = -1; // Force initial page load
-    changePage(HOME_SCREEN, true);
+
+    
+    if (proper_bootup) {
+        changePage(HOME_SCREEN, true);
+        proper_bootup = false;
+    }
+    else changePage(ASK_PIECES_SCREEN, true);
 }
 
 void NextionHandler::update() {
-    nextion.NextionListen(); // This will call the trigger functions in main.cpp
+    nextion.NextionListen(); 
     loadPageContent();       // Check if page has changed and update content
 
     // Handle periodic updates for specific pages
-
     if ((millis() - pageRefreshTimer) > 1000) {
         if (nextion.currentPageId == CONTROL_SCREEN) {
             refreshControlPage(); 
@@ -139,9 +144,9 @@ void NextionHandler::loadPageContent() {
         case SETTING_SCREEN:
             refreshSettingPage();
             break;
-        // Add cases for other pages if they need initial content loading
+   
     }
-    nextion.lastCurrentPageId = nextion.currentPageId; // Mark page as loaded
+    nextion.lastCurrentPageId = nextion.currentPageId; 
 }
 
 void NextionHandler::refreshHomePage() {
@@ -159,11 +164,10 @@ void NextionHandler::refreshBoardPage() {
             nextion.writeNum(square, id);
         }
     }
-    // Game info will be updated by updateGameInfo() call from main loop
+    
 }
 
 void NextionHandler::refreshControlPage() {
-    // This is the periodic update for the control page
     int orb_pos = motionController.stepper3.currentPosition();
     int cart_pos = motionController.stepper2.currentPosition();
     int capt_pos = motionController.stepper1.currentPosition();
@@ -225,7 +229,7 @@ void NextionHandler::movePieceOnDisplay(std::pair<int, int> from, std::pair<int,
 void NextionHandler::handleTrigger(int triggerId) {
     switch (triggerId) {
         // Reboot/Reset Triggers
-        case 0: // Generic OK/Confirm/Save button
+        case 0: 
 
             if (nextion.currentPageId == SETTING_SCREEN) {
                 if ((!board.isAtStartingPosition()) && IN_GAME) { // Check if board is modified and in game

@@ -1,10 +1,9 @@
-// --- START OF FILE nextion_handler.h ---
 #pragma once
 
 #include <EasyNextionLibrary.h>
-#include "MotionController.h" // To get status and control actuators from triggers
-#include "board.h"            // To get board state for display
-#include "enums.h"            // For page IDs
+#include "MotionController.h" 
+#include "board.h"            
+#include "enums.h"           
 
 class NextionHandler {
 public:
@@ -21,7 +20,7 @@ public:
     void changePage(int newPageId, bool forceChange = false);
     void forceFullRefresh();
 
-    // Trigger handlers (will be called from main.cpp)
+    // Trigger handlers
     void handleTrigger(int triggerId);
     String getString(String objectName); // Wrapper for nextion readStr()
     uint32_t getNumber(String objectName);  // Wrapper for nextion readNumber()
@@ -32,7 +31,7 @@ public:
 
 
 private:
-    EasyNex nextion; // The EasyNex object is now owned by this class
+    EasyNex nextion; 
     
     // References to other system components
     MotionController& motionController;
@@ -49,5 +48,4 @@ private:
     void refreshBoardPage();
     void refreshControlPage();
     void refreshSettingPage();
-    // Add other page refreshers as needed
 };

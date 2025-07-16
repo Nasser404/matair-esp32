@@ -22,7 +22,7 @@ char     ssid[SSID_MAX_LEN];
 char     password[PWD_MAX_LEN];
 char     websockets_server_host[HOST_MAX_LEN];
 uint16_t websockets_server_port;
-
+bool     proper_bootup = false;
 
 ////////////////////////////// TIMERS ///////////////////////////////
 unsigned long network_timer = millis();
@@ -81,7 +81,8 @@ void readCredentials() {
     String h = prefs.getString("host", DEFAULT_HOST);
   
     uint32_t port = prefs.getUInt("port", DEFAULT_PORT);
-  
+    proper_bootup = prefs.getBool("boot", false);
+
     prefs.end();
   
     s.toCharArray(ssid, SSID_MAX_LEN);
@@ -96,6 +97,7 @@ void writeCredentials() {
     prefs.putString("pwd",   String(password));
     prefs.putString("host",  String(websockets_server_host));
     prefs.putUInt  ("port",  websockets_server_port);
+    prefs.putBool("bool",    proper_bootup);
     prefs.end();
 }
 void reboot() {
@@ -108,6 +110,8 @@ void reboot() {
     np.toCharArray(password, PWD_MAX_LEN);
     nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
     websockets_server_port = uint16_t(npn);
+
+    if (board.isAtStartingPosition()) proper_bootup = true;
 
     // Persist in flash
     writeCredentials();
@@ -355,7 +359,11 @@ bool connect_to_server() {
         return false;
     }
  }
-
+void disconnect_from_server() {
+    client.close();
+    IN_GAME = false;
+    CONNECTED_TO_SERVER = false;
+}
 
 void setup() {
     Serial.begin(115200);
@@ -556,9 +564,7 @@ void loop() {
     if (CONNECTED_TO_SERVER) {
         if ((timer - timeout_timer > 20000) || (WiFi.status() == WL_CONNECTED)) { // 20 second timeout
             Serial.println("TIMEOUT - No PING received from server.");
-            CONNECTED_TO_SERVER = false;
-            client.close();
-            IN_GAME = false;
+            disconnect_from_server();
             nextionHandler.changePage(CONNECTION_LOST_SCREEN);
         }
     } 
@@ -571,6 +577,8 @@ void loop() {
 
     if ((RESET_ASKED) && (can_reboot)) {
         RESET_ASKED = false;
+        if (IN_GAME) disconnect_from_server();
+        
         reset_orb();
     }
 }
@@ -578,7 +586,7 @@ void loop() {
 
 
 // ===================================================================================
-// === NEXTION TRIGGER FUNCTIONS (Now delegate to NextionHandler) ====================
+// ========================== NEXTION TRIGGER FUNCTIONS  =============================
 // ===================================================================================
 void trigger0()  { nextionHandler.handleTrigger(0); }
 void trigger1()  { nextionHandler.handleTrigger(1); }

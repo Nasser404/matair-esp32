@@ -160,10 +160,6 @@ bool MotionController::startManualJog(ManualActuator actuator, bool positiveDire
         Serial.println("MC_Jog: Cannot start jog, controller busy.");
         return false;
     }
-
-    // No need for currentJoggingActuator or jogDirectionPositive if we are not using a state machine for jogging
-    // This function will be called on "Button Down" from Nextion
-
     Serial.print("MC_Jog: Starting jog for ");
     float speed = 0;
 
@@ -271,8 +267,8 @@ bool MotionController::startManualJog(ManualActuator actuator, bool positiveDire
             servo1.write(constrain(newAngle1, GRIPPER_ROT_CAPTURE, GRIPPER_ROT_BOARD));
             // For servos, this is a single action, not a continuous jog start
             // The Nextion "Press" event will move it one increment.
-            // If you want continuous, the Nextion needs to send repeated press events,
-            // or we need a state machine here. Let's assume one increment per press.
+            // If want continuous, the Nextion needs to send repeated press events,
+            // or we need a state machine here. for now increment per press.
             return true;
         }
 
