@@ -80,6 +80,4 @@ enum NEXTION_PAGE { // GET THE CORRESPONDING ID IN THE NEXTION EDITOR
 
 };
 
-extern const int pagePriorities[];
-extern const char* pageCommands[];
 

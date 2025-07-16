@@ -1,13 +1,13 @@
 #include <ArduinoWebsockets.h>
-
 #include "MotionController.h"
 #include "hardware_pins.h" 
-#include <EasyNextionLibrary.h>
 #include "config.h"
+
+
 extern websockets::WebsocketsClient client; 
 extern Board board;
-extern void change_nextion_page(int newPageId, bool force_change = false);
-extern EasyNex nextion;
+
+
 // --- Constructor ---
 MotionController::MotionController() :
     // Initialize Stepper objects with their type, step pin, and direction pin
@@ -21,6 +21,7 @@ MotionController::MotionController() :
     stateStartTime(0),
     idleEntryTime(0),
     servoDisabled(false),
+    resetProgress(0),
     // Initialize target data
     targetFromLoc(""),
     targetToLoc(""),
@@ -844,9 +845,8 @@ void MotionController::executeStateMachine()
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
         
-        int progress = resetBoardIterator/64;
-        nextion.writeNum("b_reset_bar.val", progress);
-        nextion.writeStr("b_reset_text.txt", "Clearing Board");
+        resetProgress = resetBoardIterator/64;
+        
         if (resetBoardIterator >= 64)
         {
             Serial.println("  Phase 1 (Clear Misplaced Board Pieces) Complete -> RESET_P2_START");
@@ -1258,9 +1258,9 @@ void MotionController::executeStateMachine()
         Serial.println(resetCZIterator);
 
 
-        int progress = resetCZIterator/32;
-        nextion.writeNum("b_reset_bar.val", progress);
-        nextion.writeStr("b_reset_text.txt", "Placing back pieces");
+        resetProgress = resetCZIterator/32;
+
+
         if (resetCZIterator >= 32)
         { // Done checking all CZ slots
             Serial.println("  Phase 2 (Place ALL from CZ) Complete -> RESET_P3_START");
@@ -1653,9 +1653,9 @@ void MotionController::executeStateMachine()
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
 
-        int progress = resetBoardIterator/64;
-        nextion.writeNum("b_reset_bar.val", progress);
-        nextion.writeStr("b_reset_text.txt", "Final check");
+        resetProgress = resetBoardIterator/64;
+
+    
 
         if (resetBoardIterator >= 64)
         { // Done with all board squares for phase 3
@@ -1777,8 +1777,7 @@ void MotionController::executeStateMachine()
         else
         {
             Serial.println("!!! ERROR: P3 Failed to start sub-move sequence! Skipping piece.");
-            // If it failed (e.g., already another sub-sequence active, though shouldn't happen here),
-            // then go to next iteration.
+            // If it failed// then go to next iteration.
             stateToReturnToAfterSubSequence = MOTION_IDLE; // Clear return state
             subSequenceIsActive = false;                   // Clear flag
             resetBoardIterator++;
@@ -1800,7 +1799,7 @@ void MotionController::executeStateMachine()
 
     // === Phase 4: Finish ===
     case RESET_P4_HOME_CAPTURE_MOTOR: {
-        nextion.writeStr("b_reset_text.txt", "Almost Done");
+      
         
         Serial.println("[MC Reset P4] HOME_CAPTURE_MOTOR");
         stepper1.moveTo(0);
@@ -1839,7 +1838,6 @@ void MotionController::executeStateMachine()
         Serial.println("[MC Reset] RESET_COMPLETE -> MOTION_IDLE");
         currentState = MOTION_IDLE;
         stateStartTime = millis();
-        change_nextion_page(HOME_SCREEN, true);
         break;
 
     // =================== CAPTURE SEQUENCE ==================
@@ -2503,9 +2501,7 @@ void MotionController::executeStateMachine()
 
     case ERROR_STATE:
         Serial.println("!!! Motion Controller in ERROR STATE !!!");
-        change_nextion_page(ERROR_STATE_SCREEN);
-
-        break;
+    break;
 
     default:
         Serial.print("MotionController Error: Unknown state: ");

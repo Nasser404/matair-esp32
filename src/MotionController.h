@@ -202,20 +202,20 @@ public:
     bool isBusy();
  // --- Manual Jogging Methods ---
     bool startManualJog(ManualActuator actuator, bool positiveDirection);
-    bool stopManualJog(ManualActuator actuator); // Could be generic stopAllJogs
+    bool stopManualJog(ManualActuator actuator); 
     bool stopAllManualJogs();
-    bool startMoveSequence(String fromLoc, String toLoc, bool isSubSequenceCall = false); // New
+    bool startMoveSequence(String fromLoc, String toLoc, bool isSubSequenceCall = false); 
     bool startHomingSequence();
     void initializeCaptureZone();
-    void resetInternalCaptureZoneState(); // <<<=== ADD THIS METHOD
+    void resetInternalCaptureZoneState(); 
     bool startBoardResetSequence();
-    MotionState getCurrentState() const; // <<<=== ADDED Getter Declaration
+    MotionState getCurrentState() const; 
     bool getResetSubMoveDetails(std::pair<int, int>& from, std::pair<int, int>& to);
 
     AccelStepper stepper3;
     AccelStepper stepper1;
     AccelStepper stepper2;
-
+    int resetProgress;
 private:
 
     char ManualJogServoAngle   = GRIPPER_ROT_BOARD;

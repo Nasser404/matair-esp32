@@ -9,72 +9,20 @@
 
 #include "hardware_pins.h"     
 #include "MotionController.h" 
+#include "nextion_handler.h"
+
+
 
 Preferences prefs;
-const int pagePriorities[NUMBER_OF_PAGE] = {
-  1, // HOME_SCREEN
-  1, // BOARD_SCREEN
-  1, // CONTROL_SCREEN
-  1, // SETTING_SCREEN
-  1, // CONTROL_CART_SCREEN
-  1, // CONTROL_ORB_SCREEN
-  1, // CONTROL_CAPTURE_SCREEN
-  3, // CONNECTION_LOST_SCREEN  
-  4, // ERROR_STATE_SCREEN      
-  3, // RESET_IN_PROGRESS_SCREEN
-  3, // BEFORE_REBOOT_SCREEN    
-  2, // ASK_PIECES_SCREEN       
-};
+MotionController motionController; 
+Board board;
+NextionHandler nextionHandler(motionController, board);
 
-const char* pageCommands[NUMBER_OF_PAGE] = {
-  "page home_screen",
-  "page board_screen",
-  "page control_screen",
-  "page setting_screen",
-  "page control_cart",
-  "page control_orb",
-  "page control_capture"
-};
 char     ssid[SSID_MAX_LEN];
 char     password[PWD_MAX_LEN];
 char     websockets_server_host[HOST_MAX_LEN];
 uint16_t websockets_server_port;
 
-bool hasIdentified = false;
-
-void readCredentials() {
-    prefs.begin("orb_cfg", true); // read-only
-
-    String s = prefs.getString("ssid", DEFAULT_SSID);
-    String p = prefs.getString("pwd",  DEFAULT_PWD);
-    String h = prefs.getString("host", DEFAULT_HOST);
-  
-    uint32_t port = prefs.getUInt("port", DEFAULT_PORT);
-  
-    prefs.end();
-  
-    s.toCharArray(ssid, SSID_MAX_LEN);
-    p.toCharArray(password, PWD_MAX_LEN);
-    h.toCharArray(websockets_server_host, HOST_MAX_LEN);
-    websockets_server_port = uint16_t(port);
-  }
-
-  void writeCredentials() {
-    prefs.begin("orb_cfg", false);  // RW
-    prefs.putString("ssid",  String(ssid));
-    prefs.putString("pwd",   String(password));
-    prefs.putString("host",  String(websockets_server_host));
-    prefs.putUInt  ("port",  websockets_server_port);
-    prefs.end();
-  }
-
-void force_nextion_refresh();
-
-/////////////////////////////////// NEXTION //////////////
-EasyNex nextion(Serial2);
-bool newPageLoaded = false; // true when the page is first loaded ( lastCurrentPageId != currentPageId )
-bool forceNextionFullRefresh = false; 
-/////////////////////////////////////
 
 ////////////////////////////// TIMERS ///////////////////////////////
 unsigned long network_timer = millis();
@@ -88,17 +36,20 @@ using namespace websockets;
 WebsocketsClient client;
 bool CONNECTED_TO_WIFI      = false;
 bool CONNECTED_TO_SERVER    = false;
+bool hasIdentified = false;
 ////////////////////////////////////////////////
 
-//////////////////////////// ROBOT STATE //////////////////////////
+//////////////////////////// GAME STATE //////////////////////////
 String ORB_CODE   = "";
 String GAME_ID    = "";
 String PLAYER_NAMES[2] = {"", ""};
-Board board; // Logical board state
 bool IN_GAME = false;
-
-MotionController motionController; 
 ///////////////////////////////////////////////////////////////////
+
+//////// REBOOT & RESET ////////////
+bool REBOOT_ASKED = false;
+bool RESET_ASKED  = false;
+///////////
 
 std::pair<int, int> currentMoveFromCoords = {-1, -1};
 std::pair<int, int> currentMoveToCoords = {-1, -1};
@@ -117,17 +68,53 @@ struct LastCommandInfo {
 
 };
 
-
 LastCommandInfo lastCommandProcessed;   // Global instance to store the info
 bool currentMoveIsCapture = false;      // Flag if the current command involved a capture
 bool resetBoardAfterHoming = false;     // Flag to trigger board reset after homing completes
 
-void change_nextion_page(int newPageId, bool force_change = false) {
-  if (newPageId < 0 || newPageId >= NUMBER_OF_PAGE) return; // Safety check
 
-  if ((pagePriorities[newPageId] >= pagePriorities[nextion.currentPageId]) || (force_change)) nextion.writeStr(pageCommands[nextion.currentPageId]);
+void readCredentials() {
+    prefs.begin("orb_cfg", true); // read-only
+
+    String s = prefs.getString("ssid", DEFAULT_SSID);
+    String p = prefs.getString("pwd",  DEFAULT_PWD);
+    String h = prefs.getString("host", DEFAULT_HOST);
   
+    uint32_t port = prefs.getUInt("port", DEFAULT_PORT);
+  
+    prefs.end();
+  
+    s.toCharArray(ssid, SSID_MAX_LEN);
+    p.toCharArray(password, PWD_MAX_LEN);
+    h.toCharArray(websockets_server_host, HOST_MAX_LEN);
+    websockets_server_port = uint16_t(port);
 }
+
+void writeCredentials() {
+    prefs.begin("orb_cfg", false);  // RW
+    prefs.putString("ssid",  String(ssid));
+    prefs.putString("pwd",   String(password));
+    prefs.putString("host",  String(websockets_server_host));
+    prefs.putUInt  ("port",  websockets_server_port);
+    prefs.end();
+}
+void reboot() {
+    String ns = nextionHandler.getString("txt_wifi_ssid.txt");
+    String np = nextionHandler.getString("txt_wifi_pwd.txt");
+    String nh = nextionHandler.getString("txt_ip.txt");
+    int    npn = nextionHandler.getNumber("num_port.val");
+
+    ns.toCharArray(ssid, SSID_MAX_LEN);
+    np.toCharArray(password, PWD_MAX_LEN);
+    nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
+    websockets_server_port = uint16_t(npn);
+
+    // Persist in flash
+    writeCredentials();
+    delay(1000);
+    ESP.restart();
+}
+
 String generate_orb_code() {
     String code = "";
 
@@ -172,117 +159,46 @@ void reset_orb() {
     GAME_ID = ""; PLAYER_NAMES[0] = ""; PLAYER_NAMES[1] = "";
     IN_GAME = false;
     ORB_CODE = generate_orb_code();
-    force_nextion_refresh();
     Serial.println("Reset requested. Initiating Homing Sequence first...");
+
     if (motionController.startHomingSequence()) {
+
         resetBoardAfterHoming = true; 
-        change_nextion_page(RESET_IN_PROGRESS_SCREEN);
         send_orb_status_update(); // Send OCCUPIED (due to homing)
+
     } else {
-         Serial.println("Could not start homing (already busy?). Board reset skipped.");
          resetBoardAfterHoming = false;
+
+         Serial.println("Could not start homing (already busy?). Board reset skipped.");
+         nextionHandler.forceFullRefresh();
     }
     
 }
 
 
-void move_nextion_piece(std::pair<int, int> from, std::pair<int, int> to) {
-    if (nextion.currentPageId != BOARD_SCREEN) change_nextion_page(BOARD_SCREEN); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
+bool connect_to_wifi() {
 
-    int xfrom = from.first, yfrom = from.second;
-    int xto = to.first, yto = to.second;
-           
-    String from_square  = board.getSquareString({xfrom, yfrom})     + ".picc";
-    String to_square    = board.getSquareString({xto, yto})         + ".picc";
-    int id              = board.getSquareNextionId({xfrom, yfrom});
-
-
-    nextion.writeNum(to_square, id);  
-    nextion.writeNum(from_square, 1);
-
-}
-void update_nextion_game_info() {
-    if (nextion.currentPageId != BOARD_SCREEN) change_nextion_page(BOARD_SCREEN); // IF NOT IN BOARD SCREEN, GO TO BOARD SCREEN
-    nextion.writeStr("txt_game_id.txt", GAME_ID);
-    nextion.writeStr("txt_p1_name.txt", PLAYER_NAMES[0]);
-    nextion.writeStr("txt_p2_name.txt", PLAYER_NAMES[1]);
-
-}
-
-
-void load_nextion_page(){ // This function's purpose is to update the values of a new page when is first loaded,
-        // and refreshing all the components with the current values as Nextion shows the Attribute val.
-    if (forceNextionFullRefresh) {
-        nextion.lastCurrentPageId = -1; // Force all components to update
-        forceNextionFullRefresh = false; // Reset flag
-        Serial.println("Forcing Nextion full page refresh.");
+    // Connect to wifi
+    WiFi.begin(ssid, password);
+    // Wait some time to connect to wifi
+    for(int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++) {
+        Serial.print(".");
+        delay(1000);
     }
-    if(nextion.currentPageId != nextion.lastCurrentPageId){ // If the two variables are different, means a new page is loaded.
+ 
+    // Check if connected to wifi
+    if(WiFi.status() != WL_CONNECTED) {
+        Serial.println("No Wifi!");
+        return false;
+    } else {
+        Serial.println("Connected to Wifi");
+        return true;
 
-    newPageLoaded = true;    // A new page is loaded
-                // This variable is used as an argument at the if() statement on the refreshPageXX() voids, 
-                // in order when is true to update all the values on the page with their current values
-                // with out run a comparison with the last value.
-
-    switch(nextion.currentPageId) {
-        case HOME_SCREEN :
-            nextion.writeStr("txt_orb_code.txt", ORB_CODE);
-
-            if (CONNECTED_TO_WIFI) {
-                if (CONNECTED_TO_SERVER) {
-                    nextion.writeStr("txt_connected.txt", "connected");
-                    nextion.writeNum("txt_connected.pco", 2016);
-                } else {
-                    nextion.writeStr("txt_connected.txt", "no server");
-                    nextion.writeNum("txt_connected.pco", 52000);  
-                }
-            } else {
-                nextion.writeStr("txt_connected.txt", "no wifi");
-                nextion.writeNum("txt_connected.pco", 63488);
-            }
-        break;
-
-        case BOARD_SCREEN:
-            for (int j = 0; j < 8; ++j) { // LOAD BOARD
-                for (int i = 0; i < 8; ++i) {
-                    String square  = board.getSquareString({i, j})     + ".picc";
-                    int id         = board.getSquareNextionId({i, j});
-
-                    nextion.writeNum(square, id);  
-                }
-            }
-            nextion.writeStr("txt_orb_code.txt", ORB_CODE);
-            nextion.writeStr("txt_game_id.txt", GAME_ID);
-            nextion.writeStr("txt_p1_name.txt", PLAYER_NAMES[0]);
-            nextion.writeStr("txt_p2_name.txt", PLAYER_NAMES[1]);
-        break;
-
-        case CONTROL_SCREEN:
-        break;
-
-        case SETTING_SCREEN:
-        nextion.writeStr("txt_wifi_ssid.txt",   ssid);
-        nextion.writeStr("txt_wifi_pwd.txt",    password);
-        nextion.writeStr("txt_ip.txt",          websockets_server_host);
-        nextion.writeNum("num_port.val",       websockets_server_port);
-        break;
-    }
-
-    newPageLoaded = false;  // After we have updated the new page for the first time, we update the variable to false.
-            // Now the values updated ONLY if the new value is different from the last Sent value.
-            // See void refreshPage0()
-
-    nextion.lastCurrentPageId = nextion.currentPageId; // Afer the refresh of the new page We make them equal,
-                                    // in order to identify the next page change.
     }
 }
 
 
 
-void force_nextion_refresh() {
-    forceNextionFullRefresh=true;
-    load_nextion_page();
-}
 // --- WebSocket Message Handler ---
 void handle_data(WebsocketsMessage packet) {
     String json_data = packet.data();
@@ -340,7 +256,7 @@ void handle_data(WebsocketsMessage packet) {
                 PLAYER_NAMES[1] = (const char*)data["info"]["black_orb"];
             }
 
-            update_nextion_game_info();
+             nextionHandler.updateGameInfo(GAME_ID, PLAYER_NAMES[0], PLAYER_NAMES[1]);
 
         }
         break;
@@ -350,7 +266,7 @@ void handle_data(WebsocketsMessage packet) {
             IN_GAME = false;
             Serial.println("RESET INSTRUCTION");
             //current_status = OCCUPIED;
-            reset_orb();
+            RESET_ASKED = true;
         break;
 
 
@@ -423,28 +339,6 @@ void handle_data(WebsocketsMessage packet) {
          } break;
     }
 }
-
-bool connect_to_wifi() {
-
-    // Connect to wifi
-    WiFi.begin(ssid, password);
-    // Wait some time to connect to wifi
-    for(int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++) {
-        Serial.print(".");
-        delay(1000);
-    }
- 
-    // Check if connected to wifi
-    if(WiFi.status() != WL_CONNECTED) {
-        Serial.println("No Wifi!");
-        return false;
-    } else {
-        Serial.println("Connected to Wifi");
-        return true;
-
-    }
-}
-
 bool connect_to_server() {
     Serial.println("Connecting to server.");
     // try to connect to Websockets server
@@ -465,20 +359,18 @@ bool connect_to_server() {
 
 void setup() {
     Serial.begin(115200);
-    nextion.begin(9600);
 
     readCredentials();
     Serial.printf("Loaded SSID: %s, PWD: %s, Server: %s:%u\n", ssid, password, websockets_server_host, websockets_server_port);
 
-    motionController.setup(); //  Setup Motion Controller 
 
     ORB_CODE = generate_orb_code();
     Serial.print("Generated ORB Code: "); Serial.println(ORB_CODE);
-    board.printBoard(); // Print initial logical board
+    board.printBoard();
+    
+    motionController.setup(); 
+    nextionHandler.setup();
 
-    nextion.lastCurrentPageId = -1; 
-    change_nextion_page(HOME_SCREEN, true);
-    load_nextion_page();
 
     // Initial connection attempts
     CONNECTED_TO_WIFI = connect_to_wifi();
@@ -488,16 +380,18 @@ void setup() {
             timeout_timer = millis();
         } else IN_GAME = false;
     } else IN_GAME = false;
-    force_nextion_refresh();
+
+
+    nextionHandler.forceFullRefresh(); 
 }
 
 void loop() {
     timer = millis();
-    nextion.NextionListen(); // Check for Nextion events
-
+    
+    nextionHandler.update(); // Check for Nextion events
     motionController.update(); //  Update Motion Controller
     
-    // -- Manual move (with controller) --
+    // --------------------------------- CONTROLLER  ------------------------------------- //
     if (motionController.getCurrentState() == MOTION_IDLE) {
         unsigned int step3_pos = motionController.stepper3.currentPosition();
         bool b1= (digitalRead(BUTTON_PIN_1));
@@ -519,7 +413,8 @@ void loop() {
         };
     };
 
-    // --- State Transition Detection & Actions ---
+    // -------------------------------------- State Transition Detection & Actions  ---------------------------------------------
+    /// HERE WE DO THING LIKE UPDATING NEXTION BOARD, SENDING ORB STATUS, UPDATING LOGICAL BOARD AFTER FINISHING A MOVE ////
     static MotionState lastMotionState = MOTION_IDLE;
     MotionState currentMotionState = motionController.getCurrentState();
 
@@ -529,20 +424,17 @@ void loop() {
         send_orb_status_update();
 
         // --- Post-Sequence Updates ---
-        if (lastMotionState == DO_COMPLETE)
-        {
+        if (lastMotionState == DO_COMPLETE) {
             std::pair<int, int> from, to;
-            if (motionController.getResetSubMoveDetails(from, to)) { // Check if it was a P3 reset sub-move
-                Serial.println("  DO_COMPLETE was part of RESET Phase 3 sequence.");
-                Serial.print("  Logically updating board for P3 move: ");
+            if (motionController.getResetSubMoveDetails(from, to)) { // Check if it was a reset sub-move
                 Serial.print(board.getSquareString(from)); Serial.print(" -> "); Serial.println(board.getSquareString(to));
 
-                move_nextion_piece(from, to); // Update display
+                nextionHandler.movePieceOnDisplay(from, to); // Update display
                 board.movePiece(from, to);    // Update internal logic
                 board.printBoard();
 
-            } else if (lastCommandProcessed.isValid) {
-             Serial.println("Executing Post-Move/Promotion Updates...");
+            } else if (lastCommandProcessed.isValid) { // NORMAL MOVE
+             Serial.println("Executing Post-Move Update...");
 
              from = lastCommandProcessed.fromCoords;
              to = lastCommandProcessed.toCoords;
@@ -551,11 +443,11 @@ void loop() {
 
              // --- Logical Board Update ---
              Serial.print("  Updating logical board for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
-        
-             delete board.grid[to.first][to.second];
+    
+             delete board.grid[to.first][to.second]; 
              board.grid[to.first][to.second] = nullptr;
 
-             // Get the piece that moved (should be the pawn)
+             // Get the piece that moved
              Piece* movingPiece = board.grid[from.first][from.second];
              if (movingPiece == nullptr) {
                 Serial.println("!!! ERROR: No piece found at 'from' square for logical update!");
@@ -587,12 +479,13 @@ void loop() {
              Serial.print("  Updating Nextion display for: "); Serial.print(fromStr); Serial.print(" -> "); Serial.println(toStr);
          
              String nextionFromSquare = fromStr + ".picc";
-             nextion.writeNum(nextionFromSquare, 1); 
+             nextionHandler.setNumber(nextionFromSquare, 1); 
 
              
              String nextionToSquare = toStr + ".picc";
              int finalPieceNextionId = board.getSquareNextionId(to); 
-             nextion.writeNum(nextionToSquare, finalPieceNextionId);
+             nextionHandler.setNumber(nextionToSquare, finalPieceNextionId);
+             /// WE DONT USE THE nextionHandler.movePieceOnDisplay beauce last move could have been a promotion, if so we have to change the type of the piece
              Serial.println("  Post-move updates complete.");
             }
 
@@ -614,13 +507,36 @@ void loop() {
             Serial.println("Board Reset Sequence Completed.");
             lastCommandProcessed.isValid = false; // Ensure invalid after reset
 
-            if (nextion.currentPageId == BOARD_SCREEN) forceNextionFullRefresh = true;
+            nextionHandler.forceFullRefresh();
 
        } else if (lastCommandProcessed.isValid){
             Serial.println("Became IDLE unexpectedly. Invalidating last command data.");
             lastCommandProcessed.isValid = false;
        }
     }
+    //////////////////// WE UPDATE NEXTION BASE ON MOTION CONTROLLER STATE ////////////////////
+    if (currentMotionState != lastMotionState) {
+        switch (currentMotionState) {
+            case RESET_START: 
+            nextionHandler.changePage(RESET_IN_PROGRESS_SCREEN, true); 
+            break;
+
+            case RESET_P1_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.resetProgress , "Clearing Board");      break;
+            case RESET_P2_ITERATE_CZ            : nextionHandler.updateResetStatus(motionController.resetProgress , "Placing back pieces"); break;
+            case RESET_P3_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.resetProgress , "Final check");         break;
+            case RESET_P4_HOME_CAPTURE_MOTOR    : nextionHandler.updateResetStatus(motionController.resetProgress , "Almost Done");         break;
+
+            case RESET_COMPLETE :
+            nextionHandler.changePage(HOME_SCREEN);
+            break;
+            case ERROR_STATE:
+            nextionHandler.changePage(ERROR_STATE_SCREEN, true);
+            break;
+            
+        }
+    }
+
+
     lastMotionState = currentMotionState; // Update tracker
 
 
@@ -632,6 +548,9 @@ void loop() {
         network_timer = timer;
     }
 
+
+
+
     // Handle WebSocket connection/timeout logic
     CONNECTED_TO_WIFI = (WiFi.status() == WL_CONNECTED);
     if (CONNECTED_TO_SERVER) {
@@ -640,248 +559,51 @@ void loop() {
             CONNECTED_TO_SERVER = false;
             client.close();
             IN_GAME = false;
-            change_nextion_page(CONNECTION_LOST_SCREEN);
-            // Update Nextion status immediately
-            if(nextion.currentPageId == HOME_SCREEN) { 
-                nextion.writeStr("txt_connected.txt", "no server");
-                nextion.writeNum("txt_connected.pco", 64512); // Orange/Yellow
-            }
+            nextionHandler.changePage(CONNECTION_LOST_SCREEN);
         }
     } 
 
-
-    // Refresh Nextion page contents
-    load_nextion_page();
-
-
-    if (nextion.currentPageId == CONTROL_SCREEN) {
-          if((millis() - pageRefreshTimer) > 1000){
-            
-            int orb_pos  = motionController.stepper3.currentPosition();
-            int cart_pos = motionController.stepper2.currentPosition();
-            int capt_pos = motionController.stepper1.currentPosition();
-            nextion.writeNum("num_orb_pos.val", orb_pos);
-            nextion.writeNum("num_cart_pos.val", cart_pos);
-            nextion.writeNum("num_capt_pos.val", capt_pos);
-            
-            bool is_idle = (motionController.getCurrentState() == MOTION_IDLE);
-            nextion.writeStr("txt_status.txt", is_idle ? "IDLE" : "BUSY");
-            nextion.writeNum("txt_status.pco", is_idle ? 2016 : 63488);
-            pageRefreshTimer = millis();
-          }
-    }
-}
-
-
-// --- Nextion Trigger Functions ---
-
-void reboot() {
-    String ns = nextion.readStr("txt_wifi_ssid.txt");
-    String np = nextion.readStr("txt_wifi_pwd.txt");
-    String nh = nextion.readStr("txt_ip.txt");
-    int    npn = nextion.readNumber("num_port.val");
-
-    ns.toCharArray(ssid, SSID_MAX_LEN);
-    np.toCharArray(password, PWD_MAX_LEN);
-    nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
-    websockets_server_port = uint16_t(npn);
-
-    // Persist in flash
-    writeCredentials();
-    delay(1000);
-    ESP.restart();
-}
-
-void trigger0(){     
-    switch (nextion.currentPageId)
-    {
-    case SETTING_SCREEN: {
-        
-            bool board_is_at_start = board.isAtStartingPosition();
-            if ((board_is_at_start) && (!IN_GAME)) change_nextion_page(BEFORE_REBOOT_SCREEN);
-            else reboot();
-    }
-        break;
-    
-    case BEFORE_REBOOT_SCREEN:{
+    bool can_reboot = ( (currentMotionState == MOTION_IDLE) || (currentMotionState == ERROR_STATE));
+    if ((REBOOT_ASKED) && (can_reboot)) {
+        REBOOT_ASKED = false;
         reboot();
     }
-    break;
-    case ERROR_STATE_SCREEN : {
-        reboot();
-    }
-      
-    break;
 
-    default:
-        break;
-    }   
-   
-}
-
-void trigger1() {  Serial.println("Nextion Home Button Pressed.");
-    if (!motionController.isBusy()) {
-        motionController.startHomingSequence();
-    } else {
-        Serial.println("Cannot Home: Motion Controller is busy.");
+    if ((RESET_ASKED) && (can_reboot)) {
+        RESET_ASKED = false;
+        reset_orb();
     }
 }
 
 
-void trigger40() { // CLICKED RESET ON ASK REBOOT SCREEN
 
-    reset_orb();
-}
-
-
-
-// === CART Stepper ===
-void trigger2() { // Cart + PRESS
-
-    Serial.println("Nextion: Cart + PRESS");
-    motionController.startManualJog(ManualActuator::STEPPER_CART, true);
-
-    
-}
-void trigger3() { // Cart + RELEASE
-
-    Serial.println("Nextion: Cart + RELEASE");
-    motionController.stopManualJog(ManualActuator::STEPPER_CART);
-    
-}
-void trigger4() { // Cart - PRESS
-
-    Serial.println("Nextion: Cart - PRESS");
-    motionController.startManualJog(ManualActuator::STEPPER_CART, false);
-    
-}
-void trigger5() { // Cart - RELEASE
-
-    Serial.println("Nextion: Cart - RELEASE");
-    motionController.stopManualJog(ManualActuator::STEPPER_CART);
-
-}
-
-// === ORB Stepper ===
-void trigger6() { // Orb + PRESS
-    
-        Serial.println("Nextion: Orb + PRESS");
-        motionController.startManualJog(ManualActuator::STEPPER_ORB, true);
-    
-}
-void trigger7() { // Orb + RELEASE
-    
-        Serial.println("Nextion: Orb + RELEASE");
-        motionController.stopManualJog(ManualActuator::STEPPER_ORB);
-    
-}
-void trigger8() { // Orb - PRESS
-    
-        Serial.println("Nextion: Orb - PRESS");
-        motionController.startManualJog(ManualActuator::STEPPER_ORB, false);
-    
-}
-void trigger9() { // Orb - RELEASE
-    
-        Serial.println("Nextion: Orb - RELEASE");
-        motionController.stopManualJog(ManualActuator::STEPPER_ORB);
-    
-}
-
-// === CAPTURE Stepper ===
-void trigger10() { // Capture + PRESS
-    
-        Serial.println("Nextion: Capture + PRESS");
-        motionController.startManualJog(ManualActuator::STEPPER_CAPTURE, true);
-    
-}
-void trigger11() { // Capture + RELEASE
-    
-        Serial.println("Nextion: Capture + RELEASE");
-        motionController.stopManualJog(ManualActuator::STEPPER_CAPTURE);
-    
-}
-void trigger12() { // Capture - PRESS
-    
-        Serial.println("Nextion: Capture - PRESS");
-        motionController.startManualJog(ManualActuator::STEPPER_CAPTURE, false);
-    
-}
-void trigger13() { // Capture - RELEASE
-    
-        Serial.println("Nextion: Capture - RELEASE");
-        motionController.stopManualJog(ManualActuator::STEPPER_CAPTURE);
-    
-}
-
-// === GRIPPER ROTATION (Servo1) ===
-void trigger14() { // Gripper Rot + PRESS
-    
-        Serial.println("Nextion: Gripper Rot + PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, true); // True = more positive angle
-    
-}
-void trigger15() { // Gripper Rot + RELEASE - Does nothing for stepped servo control
-    
-    
-}
-void trigger16() { // Gripper Rot - PRESS
-    
-        Serial.println("Nextion: Gripper Rot - PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_ROTATION, false); // False = more negative angle
-    
-}
-void trigger17() { // Gripper Rot - RELEASE - Does nothing
-    
-    
-}
-
-// === LINEAR ACTUATOR ===
-void trigger18() { // Linear Actuator + PRESS (Extend)
-    
-        Serial.println("Nextion: Linear Actuator + PRESS (Extend)");
-        motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, true); // True = Extend
-    
-}
-void trigger19() { // Linear Actuator + RELEASE (Stop Extend)
-    
-        Serial.println("Nextion: Linear Actuator + RELEASE (Stop)");
-        motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
-    
-}
-void trigger20() { // Linear Actuator - PRESS (Retract)
-    
-        Serial.println("Nextion: Linear Actuator - PRESS (Retract)");
-        motionController.startManualJog(ManualActuator::LINEAR_ACTUATOR, false); // False = Retract
-    
-}
-void trigger21() { // Linear Actuator - RELEASE (Stop Retract)
-    
-        Serial.println("Nextion: Linear Actuator - RELEASE (Stop)");
-        motionController.stopManualJog(ManualActuator::LINEAR_ACTUATOR);
-    
-}
-
-// === GRIPPER OPEN/CLOSE (Servo2) ===
-void trigger22() { // Gripper Open + PRESS
-    
-        Serial.println("Nextion: Gripper Open + PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, true); 
-    
-}
-void trigger23() { // Gripper Open + RELEASE - Does nothing
-    
-    
-}
-void trigger24() { // Gripper Close - PRESS
-    
-        Serial.println("Nextion: Gripper Close - PRESS (Step)");
-        motionController.startManualJog(ManualActuator::GRIPPER_OPEN_CLOSE, false);
-    
-}
-void trigger25() { // Gripper Close - RELEASE
-    
-    
-}
-
-
+// ===================================================================================
+// === NEXTION TRIGGER FUNCTIONS (Now delegate to NextionHandler) ====================
+// ===================================================================================
+void trigger0()  { nextionHandler.handleTrigger(0); }
+void trigger1()  { nextionHandler.handleTrigger(1); }
+void trigger2()  { nextionHandler.handleTrigger(2); }
+void trigger3()  { nextionHandler.handleTrigger(3); }
+void trigger4()  { nextionHandler.handleTrigger(4); }
+void trigger5()  { nextionHandler.handleTrigger(5); }
+void trigger6()  { nextionHandler.handleTrigger(6); }
+void trigger7()  { nextionHandler.handleTrigger(7); }
+void trigger8()  { nextionHandler.handleTrigger(8); }
+void trigger9()  { nextionHandler.handleTrigger(9); }
+void trigger10() { nextionHandler.handleTrigger(10); }
+void trigger11() { nextionHandler.handleTrigger(11); }
+void trigger12() { nextionHandler.handleTrigger(12); }
+void trigger13() { nextionHandler.handleTrigger(13); }
+void trigger14() { nextionHandler.handleTrigger(14); }
+void trigger15() { nextionHandler.handleTrigger(15); }
+void trigger16() { nextionHandler.handleTrigger(16); }
+void trigger17() { nextionHandler.handleTrigger(17); }
+void trigger18() { nextionHandler.handleTrigger(18); }
+void trigger19() { nextionHandler.handleTrigger(19); }
+void trigger20() { nextionHandler.handleTrigger(20); }
+void trigger21() { nextionHandler.handleTrigger(21); }
+void trigger22() { nextionHandler.handleTrigger(22); }
+void trigger23() { nextionHandler.handleTrigger(23); }
+void trigger24() { nextionHandler.handleTrigger(24); }
+void trigger25() { nextionHandler.handleTrigger(25); }
+void trigger40() { nextionHandler.handleTrigger(40); }
