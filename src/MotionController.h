@@ -216,6 +216,9 @@ public:
     AccelStepper stepper1;
     AccelStepper stepper2;
     int resetProgress;
+
+
+    int getResetProgress();
 private:
 
     char ManualJogServoAngle   = GRIPPER_ROT_BOARD;

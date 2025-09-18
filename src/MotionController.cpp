@@ -823,7 +823,7 @@ void MotionController::executeStateMachine()
         break;
     // =================== FULL PHYSICAL BOARD RESET SEQUENCE ==================
     case RESET_START:
-        Serial.println("[MC Reset] RESET_START -> Phase 1: Clear Misplaced from Board");
+        Serial.println("[MC Reset] RESET_START -> Phase 1: Clear Misplaced from Board -> SHOULD GO TO RESET PAGE");
         resetBoardIterator = 0;
         currentState = RESET_P1_ITERATE_BOARD;
         stateStartTime = millis();
@@ -841,8 +841,8 @@ void MotionController::executeStateMachine()
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
         
-        resetProgress = resetBoardIterator/64;
-        
+        resetProgress = (resetBoardIterator * 100) / 64;
+
         if (resetBoardIterator >= 64)
         {
             Serial.println("  Phase 1 (Clear Misplaced Board Pieces) Complete -> RESET_P2_START");
@@ -1254,7 +1254,7 @@ void MotionController::executeStateMachine()
         Serial.println(resetCZIterator);
 
 
-        resetProgress = resetCZIterator/32;
+        resetProgress = (resetCZIterator * 100) / 32;
 
 
         if (resetCZIterator >= 32)
@@ -1649,7 +1649,7 @@ void MotionController::executeStateMachine()
         Serial.print(reset_currentBoardAlg);
         Serial.println(")");
 
-        resetProgress = resetBoardIterator/64;
+        resetProgress = (resetBoardIterator * 100) / 64;
 
     
 
@@ -2496,7 +2496,7 @@ void MotionController::executeStateMachine()
         break;
 
     case ERROR_STATE:
-        Serial.println("!!! Motion Controller in ERROR STATE !!!");
+    if (previousState != currentState) Serial.println("!!! Motion Controller in ERROR STATE !!!");
     break;
 
     default:
@@ -2511,4 +2511,12 @@ void MotionController::executeStateMachine()
 MotionState MotionController::getCurrentState() const
 {
     return currentState;
+}
+
+
+int MotionController::getResetProgress() {
+
+    Serial.println("\n!!!!!!!!! PROGRES !!!!!!!!! ");
+    Serial.println(resetProgress);
+    return resetProgress;
 }

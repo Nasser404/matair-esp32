@@ -14,6 +14,12 @@
 
 
 Preferences prefs;
+
+String ns;
+String np; 
+String nh; 
+int    npn;
+
 MotionController motionController; 
 Board board;
 NextionHandler nextionHandler(motionController, board);
@@ -85,6 +91,8 @@ void readCredentials() {
 
     prefs.end();
   
+
+
     s.toCharArray(ssid, SSID_MAX_LEN);
     p.toCharArray(password, PWD_MAX_LEN);
     h.toCharArray(websockets_server_host, HOST_MAX_LEN);
@@ -97,21 +105,33 @@ void writeCredentials() {
     prefs.putString("pwd",   String(password));
     prefs.putString("host",  String(websockets_server_host));
     prefs.putUInt  ("port",  websockets_server_port);
-    prefs.putBool("bool",    proper_bootup);
+    prefs.putBool("boot",    proper_bootup);
     prefs.end();
 }
+
+
 void reboot() {
-    String ns = nextionHandler.getString("txt_wifi_ssid.txt");
-    String np = nextionHandler.getString("txt_wifi_pwd.txt");
-    String nh = nextionHandler.getString("txt_ip.txt");
-    int    npn = nextionHandler.getNumber("num_port.val");
+    if (nextionHandler.getCurrentPage() == SETTING_SCREEN) {
+        ns = nextionHandler.getString("txt_wifi_ssid.txt");
+        np = nextionHandler.getString("txt_wifi_pwd.txt");
+        nh = nextionHandler.getString("txt_ip.txt");
+        npn = nextionHandler.getNumber("num_port.val");
+    }
 
-    ns.toCharArray(ssid, SSID_MAX_LEN);
-    np.toCharArray(password, PWD_MAX_LEN);
-    nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
-    websockets_server_port = uint16_t(npn);
+    
+    Serial.println("!!!!! REBOOTING !!!!!");
+    Serial.println(ns);
+    Serial.println(np);
+    Serial.println(nh);
+    Serial.println(npn);
 
-    if (board.isAtStartingPosition()) proper_bootup = true;
+    if (ns != "") {
+        ns.toCharArray(ssid, SSID_MAX_LEN);
+        np.toCharArray(password, PWD_MAX_LEN);
+        nh.toCharArray(websockets_server_host, HOST_MAX_LEN);
+        websockets_server_port = uint16_t(npn);
+    }
+    proper_bootup = board.isAtStartingPosition();
 
     // Persist in flash
     writeCredentials();
@@ -149,7 +169,7 @@ void send_orb_status_update() {
 
     String json_data;
     serializeJson(orb_data, json_data);
-
+    Serial.println("SENDING ORB UPDATE");
     if (client.available()) { 
        client.send(json_data);
        Serial.print("Sent Orb Status Update: "); Serial.println(current_status == IDLE ? "IDLE" : "OCCUPIED");
@@ -162,12 +182,13 @@ void send_orb_status_update() {
 void reset_orb() {
     GAME_ID = ""; PLAYER_NAMES[0] = ""; PLAYER_NAMES[1] = "";
     IN_GAME = false;
-    ORB_CODE = generate_orb_code();
+
     Serial.println("Reset requested. Initiating Homing Sequence first...");
 
     if (motionController.startHomingSequence()) {
 
         resetBoardAfterHoming = true; 
+        nextionHandler.changePage(RESET_IN_PROGRESS_SCREEN, true);
         send_orb_status_update(); // Send OCCUPIED (due to homing)
 
     } else {
@@ -241,6 +262,8 @@ void handle_data(WebsocketsMessage packet) {
 
             client.send(json_data);
             hasIdentified = true;
+            delay(100);
+            send_orb_status_update();
         }
         break;
 
@@ -375,9 +398,11 @@ void setup() {
     ORB_CODE = generate_orb_code();
     Serial.print("Generated ORB Code: "); Serial.println(ORB_CODE);
     board.printBoard();
-    
-    motionController.setup(); 
+
     nextionHandler.setup();
+    motionController.setup(); 
+
+
 
 
     // Initial connection attempts
@@ -389,13 +414,14 @@ void setup() {
         } else IN_GAME = false;
     } else IN_GAME = false;
 
-
+  
     nextionHandler.forceFullRefresh(); 
+
 }
 
 void loop() {
-    timer = millis();
-    
+  
+
     nextionHandler.update(); // Check for Nextion events
     motionController.update(); //  Update Motion Controller
     
@@ -524,22 +550,19 @@ void loop() {
     }
     //////////////////// WE UPDATE NEXTION BASE ON MOTION CONTROLLER STATE ////////////////////
     if (currentMotionState != lastMotionState) {
+
         switch (currentMotionState) {
-            case RESET_START: 
-            nextionHandler.changePage(RESET_IN_PROGRESS_SCREEN, true); 
-            break;
-
-            case RESET_P1_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.resetProgress , "Clearing Board");      break;
-            case RESET_P2_ITERATE_CZ            : nextionHandler.updateResetStatus(motionController.resetProgress , "Placing back pieces"); break;
-            case RESET_P3_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.resetProgress , "Final check");         break;
-            case RESET_P4_HOME_CAPTURE_MOTOR    : nextionHandler.updateResetStatus(motionController.resetProgress , "Almost Done");         break;
-
-            case RESET_COMPLETE :
-            nextionHandler.changePage(HOME_SCREEN);
-            break;
-            case ERROR_STATE:
-            nextionHandler.changePage(ERROR_STATE_SCREEN, true);
-            break;
+            case HOMING_START : send_orb_status_update(); break;
+            case HOMING_COMPLETE :          send_orb_status_update(); break;
+            case MOTION_IDLE :          send_orb_status_update(); break;
+            case RESET_START: break;
+         
+            case RESET_P1_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Clearing Board");        break;
+            case RESET_P2_ITERATE_CZ            : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Placing back pieces");   break;
+            case RESET_P3_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Final check");            break;
+            case RESET_P4_HOME_CAPTURE_MOTOR    : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Almost Done");            
+            case RESET_COMPLETE                 : nextionHandler.changePage(HOME_SCREEN, true); break;
+            case ERROR_STATE                    : nextionHandler.changePage(ERROR_STATE_SCREEN, true); Serial.println("!!!!!! MOTION CONTROLLER IN ERROR STATE");  break;
             
         }
     }
@@ -547,7 +570,7 @@ void loop() {
 
     lastMotionState = currentMotionState; // Update tracker
 
-
+    timer = millis();
     // Handle WebSocket polling l
     if (timer - network_timer > 200) {
         if(CONNECTED_TO_SERVER && client.available()) {
@@ -562,14 +585,14 @@ void loop() {
     // Handle WebSocket connection/timeout logic
     CONNECTED_TO_WIFI = (WiFi.status() == WL_CONNECTED);
     if (CONNECTED_TO_SERVER) {
-        if ((timer - timeout_timer > 20000) || (WiFi.status() == WL_CONNECTED)) { // 20 second timeout
+        if ((timer - timeout_timer > 20000) || (CONNECTED_TO_WIFI == false)) { // 20 second timeout
             Serial.println("TIMEOUT - No PING received from server.");
             disconnect_from_server();
             nextionHandler.changePage(CONNECTION_LOST_SCREEN);
         }
     } 
 
-    bool can_reboot = ( (currentMotionState == MOTION_IDLE) || (currentMotionState == ERROR_STATE));
+    bool can_reboot = ( ( (currentMotionState == MOTION_IDLE)  || (IN_GAME == false))  || (currentMotionState == ERROR_STATE));
     if ((REBOOT_ASKED) && (can_reboot)) {
         REBOOT_ASKED = false;
         reboot();

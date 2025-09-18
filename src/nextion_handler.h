@@ -28,7 +28,7 @@ public:
     void setString(String objectName, String value);
     void setNumber(String objectName, uint32_t value);
     void updateResetStatus(int progress, String status);
-
+    int getCurrentPage();
 
 private:
     EasyNex nextion; 

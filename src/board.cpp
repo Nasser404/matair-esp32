@@ -1,5 +1,10 @@
 #include <board.h>
 Board::Board() {
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            grid[i][j] = nullptr;
+        }
+    }
     initializeBoard();
 }
 
@@ -130,44 +135,68 @@ void Board::resetBoard() {
     initializeBoard();
 }
 
-bool Board::isAtStartingPosition() const {
-    // Create a temporary standard board to compare against
-    Board standardBoard; // This calls the constructor, which calls initializeBoard()
+#include <cctype> // Required for the tolower() function
 
-    // Iterate through every square
-    for (int i = 0; i < 8; ++i) {
-        for (int j = 0; j < 8; ++j) {
-            Piece* currentPiece = this->grid[i][j]; // The piece on our actual board
-            Piece* standardPiece = standardBoard.grid[i][j]; // The piece that SHOULD be here
+bool Board::isAtStartingPosition() {
+    // Represents the standard chess starting board layout.
+    // Uppercase for BLACK, lowercase for WHITE. '*' for empty.
+    // This is indexed as [row][column] for easy visualization.
+    const char initialBoardLayout[8][8] = {
+        {'R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'}, // Row 0 (Black's back rank)
+        {'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'}, // Row 1 (Black's pawns)
+        {'*', '*', '*', '*', '*', '*', '*', '*'}, // Row 2
+        {'*', '*', '*', '*', '*', '*', '*', '*'}, // Row 3
+        {'*', '*', '*', '*', '*', '*', '*', '*'}, // Row 4
+        {'*', '*', '*', '*', '*', '*', '*', '*'}, // Row 5
+        {'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'}, // Row 6 (White's pawns)
+        {'r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'}  // Row 7 (White's back rank)
+    };
 
-            // Case 1: Both squares are empty
-            if (currentPiece == nullptr && standardPiece == nullptr) {
-                continue; // This square is correct, check the next one
+    // Iterate through your board, which is indexed as grid[column][row]
+    for (int col = 0; col < 8; ++col) {
+        for (int row = 0; row < 8; ++row) {
+            Piece* currentPiece = this->grid[col][row];
+            char expectedPieceChar = initialBoardLayout[row][col]; // Compare against layout[row][col]
+
+            // Case 1: The square should be empty
+            if (expectedPieceChar == '*') {
+                if (currentPiece != nullptr) {
+                    // This square should be empty, but it has a piece.
+                    return false;
+                }
             }
+            // Case 2: The square should have a piece
+            else {
+                if (currentPiece == nullptr) {
+                    // This square should have a piece, but it's empty.
+                    return false;
+                }
 
-            // Case 2: One square is empty and the other is not
-            if ((currentPiece == nullptr && standardPiece != nullptr) ||
-                (currentPiece != nullptr && standardPiece == nullptr)) {
-                Serial.print("Board mismatch: Square ("); Serial.print(i); Serial.print(","); Serial.print(j);
-                Serial.println(") has a piece when it should be empty, or vice-versa.");
-                // No need to delete standardBoard pieces, its destructor will handle it when it goes out of scope.
-                return false; // Mismatch found
+                // Check if the piece color is correct
+                PieceColor expectedColor = (expectedPieceChar >= 'a' && expectedPieceChar <= 'z') ? PieceColor::WHITE : PieceColor::BLACK;
+                if (currentPiece->getColor() != expectedColor) {
+                    return false; // Mismatch in piece color
+                }
+
+                // Check if the piece type is correct
+                PieceType expectedType;
+                switch (tolower(expectedPieceChar)) {
+                    case 'r': expectedType = PieceType::ROOK;   break;
+                    case 'n': expectedType = PieceType::KNIGHT; break;
+                    case 'b': expectedType = PieceType::BISHOP; break;
+                    case 'q': expectedType = PieceType::QUEEN;  break;
+                    case 'k': expectedType = PieceType::KING;   break;
+                    case 'p': expectedType = PieceType::PAWN;   break;
+                    default:  return false; // Should never happen
+                }
+
+                if (currentPiece->getType() != expectedType) {
+                    return false; // Mismatch in piece type
+                }
             }
-
-            // Case 3: Both squares have pieces, check if they are the same type and color
-            if (currentPiece->getType() != standardPiece->getType() ||
-                currentPiece->getColor() != standardPiece->getColor()) {
-                Serial.print("Board mismatch: Square ("); Serial.print(i); Serial.print(","); Serial.print(j);
-                Serial.print(") has piece "); Serial.print(currentPiece->getSymbol());
-                Serial.print(" but should have "); Serial.println(standardPiece->getSymbol());
-                // No need to delete standardBoard pieces, its destructor will handle it when it goes out of scope.
-                return false; // Mismatch found
-            }
-
-            // If we get here, the pieces on this square match. Continue to next square.
         }
     }
 
-    // If the loop completes without finding any mismatches, the board is in the starting position
+    // If all squares have been checked and no mismatches were found, the board is correct.
     return true;
 }

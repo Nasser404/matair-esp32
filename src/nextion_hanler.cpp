@@ -14,6 +14,13 @@ extern void writeCredentials();
 extern bool RESET_ASKED;
 extern bool REBOOT_ASKED;
 extern bool proper_bootup;
+extern String ns;
+extern String np; 
+extern String nh; 
+extern int    npn;
+extern String GAME_ID;
+extern String PLAYER_NAMES[2];
+
 const int pagePriorities[NUMBER_OF_PAGE] = {
   1, // HOME_SCREEN
   1, // BOARD_SCREEN
@@ -29,19 +36,24 @@ const int pagePriorities[NUMBER_OF_PAGE] = {
   2, // ASK_PIECES_SCREEN       
 };
 
-const char* pageCommands[NUMBER_OF_PAGE] = {
-  "page home_screen",
-  "page board_screen",
-  "page control_screen",
-  "page setting_screen",
-  "page control_cart",
-  "page control_orb",
-  "page control_capt",
-  "page connect_lost",
-  "page error_screen",
-  "page before_reboot",
-  "page ask_piece"
-};
+// Function to convert NEXTION_PAGE to string
+String getPageName(int page) {
+    switch (page) {
+        case HOME_SCREEN:             return "page home_screen";
+        case BOARD_SCREEN:            return "page board_screen";
+        case CONTROL_SCREEN:          return "page control_screen";
+        case SETTING_SCREEN:          return "page setting_screen";
+        case CONTROL_CART_SCREEN:     return "page control_cart";
+        case CONTROL_ORB_SCREEN:      return "page control_orb";
+        case CONTROL_CAPTURE_SCREEN:  return "page control_capt";
+        case CONNECTION_LOST_SCREEN:  return "page connect_lost";
+        case ERROR_STATE_SCREEN:      return "page error_screen";
+        case RESET_IN_PROGRESS_SCREEN:return "page reset_screen";
+        case BEFORE_REBOOT_SCREEN:    return "page before_reboot";
+        case ASK_PIECES_SCREEN:       return "page ask_piece";
+        default:                      return "page home_screen";
+    }
+}
 
 
 NextionHandler::NextionHandler(MotionController& mc, Board& b) :
@@ -55,7 +67,8 @@ void NextionHandler::setup() {
     nextion.begin(9600);
     nextion.lastCurrentPageId = -1; // Force initial page load
 
-    
+    delay(1000);
+
     if (proper_bootup) {
         changePage(HOME_SCREEN, true);
         proper_bootup = false;
@@ -106,10 +119,14 @@ void NextionHandler::changePage(int newPageId, bool forceChange) {
     
     // Logic to prevent moving from a high-priority screen (like an error) to a low one
     if (forceChange || (pagePriorities[newPageId] >= pagePriorities[nextion.currentPageId])) {
-        Serial.print("Nextion: Changing page to "); Serial.println(pageCommands[newPageId]);
-        nextion.writeStr(pageCommands[newPageId]);
+        Serial.print("Nextion: Changing page to "); Serial.print(newPageId); 
+        
+        
+        
+        Serial.println(getPageName(newPageId));
+        nextion.writeStr(getPageName(newPageId));
     } else {
-        Serial.print("Nextion: Page change to "); Serial.print(pageCommands[newPageId]);
+        Serial.print("Nextion: Page change to "); Serial.print(getPageName(newPageId));
         Serial.println(" blocked due to priority.");
     }
 }
@@ -150,13 +167,20 @@ void NextionHandler::loadPageContent() {
 }
 
 void NextionHandler::refreshHomePage() {
-    Serial.println("Nextion: Refreshing Home Screen.");
+    //Serial.println("Nextion: Refreshing Home Screen.");
     nextion.writeStr("txt_orb_code.txt", ORB_CODE);
     updateConnectionStatus();
 }
+void NextionHandler::updateGameInfo(const String& gameId, const String& p1Name, const String& p2Name) {
+    if (nextion.currentPageId == BOARD_SCREEN) {
+        nextion.writeStr("txt_game_id.txt", gameId);
+        nextion.writeStr("txt_p1_name.txt", p1Name);
+        nextion.writeStr("txt_p2_name.txt", p2Name);
+    }
+}
 
 void NextionHandler::refreshBoardPage() {
-    Serial.println("Nextion: Refreshing Board Screen (Full Redraw).");
+    //Serial.println("Nextion: Refreshing Board Screen (Full Redraw).");
     for (int j = 0; j < 8; ++j) {
         for (int i = 0; i < 8; ++i) {
             String square = board.getSquareString({i, j}) + ".picc";
@@ -164,7 +188,8 @@ void NextionHandler::refreshBoardPage() {
             nextion.writeNum(square, id);
         }
     }
-    
+    nextion.writeStr("txt_orb_code.txt", ORB_CODE);
+    updateGameInfo(GAME_ID, PLAYER_NAMES[0], PLAYER_NAMES[1]);
 }
 
 void NextionHandler::refreshControlPage() {
@@ -175,13 +200,20 @@ void NextionHandler::refreshControlPage() {
     nextion.writeNum("num_cart_pos.val", cart_pos);
     nextion.writeNum("num_capt_pos.val", capt_pos);
 
-    bool is_idle = (motionController.getCurrentState() == MOTION_IDLE);
+    bool is_idle = (!motionController.isBusy());
     nextion.writeStr("txt_status.txt", is_idle ? "IDLE" : "BUSY");
     nextion.writeNum("txt_status.pco", is_idle ? 2016 : 63488); // Green for IDLE, Red for BUSY
 }
 
 void NextionHandler::refreshSettingPage() {
-    Serial.println("Nextion: Refreshing Settings Screen.");
+    //Serial.println("Nextion: Refreshing Settings Screen.");
+
+    
+    ns = nextion.readStr("txt_wifi_ssid.txt");
+    np = nextion.readStr("txt_wifi_pwd.txt");
+    nh = nextion.readStr("txt_ip.txt");
+    npn = nextion.readNumber("num_port.val");
+
     nextion.writeStr("txt_wifi_ssid.txt", ssid);
     nextion.writeStr("txt_wifi_pwd.txt", password);
     nextion.writeStr("txt_ip.txt", websockets_server_host);
@@ -205,13 +237,6 @@ void NextionHandler::updateConnectionStatus() {
     }
 }
 
-void NextionHandler::updateGameInfo(const String& gameId, const String& p1Name, const String& p2Name) {
-    if (nextion.currentPageId == BOARD_SCREEN) {
-        nextion.writeStr("txt_game_id.txt", gameId);
-        nextion.writeStr("txt_p1_name.txt", p1Name);
-        nextion.writeStr("txt_p2_name.txt", p2Name);
-    }
-}
 
 void NextionHandler::movePieceOnDisplay(std::pair<int, int> from, std::pair<int, int> to) {
     if (nextion.currentPageId != BOARD_SCREEN) {
@@ -232,11 +257,11 @@ void NextionHandler::handleTrigger(int triggerId) {
         case 0: 
 
             if (nextion.currentPageId == SETTING_SCREEN) {
-                if ((!board.isAtStartingPosition()) && IN_GAME) { // Check if board is modified and in game
+                if ((board.isAtStartingPosition() ==  false)) { // Check if board is modified and in game
                     changePage(BEFORE_REBOOT_SCREEN);
                 } else {
                     // Directly reboot if not in-game or board is clean
-                    nextion.writeStr("txt_reboot.txt", "Saving & Rebooting...");
+        
                     REBOOT_ASKED = true; 
                 }
             } else if (nextion.currentPageId == BEFORE_REBOOT_SCREEN || nextion.currentPageId == ERROR_STATE_SCREEN) {
@@ -252,7 +277,7 @@ void NextionHandler::handleTrigger(int triggerId) {
             Serial.println("Nextion: Home Button Pressed.");
             if (!motionController.isBusy()) {
                 motionController.startHomingSequence();
-                changePage(RESET_IN_PROGRESS_SCREEN);
+
             } else {
                 Serial.println("Cannot Home: Motion Controller is busy.");
             }
@@ -298,4 +323,8 @@ void NextionHandler::handleTrigger(int triggerId) {
             Serial.print("Unhandled Nextion Trigger ID: "); Serial.println(triggerId);
             break;
     }
+}
+
+int NextionHandler::getCurrentPage() {
+    return nextion.currentPageId;
 }
