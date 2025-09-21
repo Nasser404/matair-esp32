@@ -543,6 +543,9 @@ void loop() {
 
             nextionHandler.forceFullRefresh();
 
+            motionController.startHomingSequence();
+            send_orb_status_update();
+
        } else if (lastCommandProcessed.isValid){
             Serial.println("Became IDLE unexpectedly. Invalidating last command data.");
             lastCommandProcessed.isValid = false;
@@ -552,17 +555,17 @@ void loop() {
     if (currentMotionState != lastMotionState) {
 
         switch (currentMotionState) {
-            case HOMING_START : send_orb_status_update(); break;
-            case HOMING_COMPLETE :          send_orb_status_update(); break;
-            case MOTION_IDLE :          send_orb_status_update(); break;
-            case RESET_START: break;
-         
-            case RESET_P1_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Clearing Board");        break;
-            case RESET_P2_ITERATE_CZ            : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Placing back pieces");   break;
-            case RESET_P3_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Final check");            break;
-            case RESET_P4_HOME_CAPTURE_MOTOR    : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Almost Done");            
-            case RESET_COMPLETE                 : nextionHandler.changePage(HOME_SCREEN, true); break;
-            case ERROR_STATE                    : nextionHandler.changePage(ERROR_STATE_SCREEN, true); Serial.println("!!!!!! MOTION CONTROLLER IN ERROR STATE");  break;
+
+            case HOMING_START                   : send_orb_status_update();                                                                                         break;
+            case HOMING_COMPLETE                : send_orb_status_update();                                                                                         break;
+            case MOTION_IDLE                    : send_orb_status_update();                                                                                         break;
+            case RESET_START                    :                                                                                                                   break;
+            case RESET_P1_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Clearing Board");                         break;
+            case RESET_P2_ITERATE_CZ            : nextionHandler.updateResetStatus(motionController.getResetProgress() , "Placing back pieces");                    break;
+            case RESET_P3_ITERATE_BOARD         : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Final check");                             break;
+            case RESET_P4_HOME_CAPTURE_MOTOR    : nextionHandler.updateResetStatus(motionController.getResetProgress(), "Almost Done");                             break;
+            case RESET_COMPLETE                 : nextionHandler.changePage(HOME_SCREEN, true);                                                                     break;
+            case ERROR_STATE                    : nextionHandler.changePage(ERROR_STATE_SCREEN, true); Serial.println("!!!!!! MOTION CONTROLLER IN ERROR STATE");   break;
             
         }
     }
